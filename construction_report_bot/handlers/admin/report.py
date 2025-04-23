@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Optional
 from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy import select
+from aiogram.types import BufferedInputFile
 
 from construction_report_bot.database.crud import (
     get_user_by_telegram_id,
@@ -29,7 +30,8 @@ from construction_report_bot.database.crud import (
     get_report_with_relations,
     get_reports_by_status,
     get_all_clients,
-    get_user_by_id
+    get_user_by_id,
+    get_reports_for_export
 )
 from construction_report_bot.database.session import get_session, async_session
 from construction_report_bot.database.models import (
@@ -65,6 +67,7 @@ from construction_report_bot.utils.report_utils import (
     generate_report_summary,
     format_report_message
 )
+from construction_report_bot.utils.export_utils import export_report_to_pdf, export_report_to_excel
 
 logger = logging.getLogger(__name__)
 
@@ -1424,7 +1427,7 @@ async def process_select_report_for_sending(callback: CallbackQuery, state: FSMC
             ])
         
         # Добавляем кнопку "Назад"
-        back_button = InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_reports")
+        back_button = InlineKeyboardButton(text="◀️ Назад", callback_data="admin_report_menu")
         keyboard.append([back_button])
         
         await callback.message.answer(
@@ -1787,3 +1790,170 @@ async def process_itr_done(callback: CallbackQuery, state: FSMContext):
     except Exception as e:
         logging.error(f"Ошибка при сохранении ИТР: {str(e)}")
         await callback.message.answer("Произошла ошибка при сохранении ИТР") 
+
+@admin_report_router.callback_query(F.data == "export_report")
+@error_handler
+@with_session
+async def process_export_report_menu(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Показать меню экспорта отчетов"""
+    try:
+        # Получаем все отчеты
+        reports = await get_reports_for_export(session)
+        
+        if not reports:
+            await callback.message.edit_text(
+                "❌ Нет доступных отчетов для экспорта",
+                reply_markup=await get_admin_report_menu_keyboard()
+            )
+            return
+        
+        # Формируем клавиатуру с отчетами
+        keyboard = InlineKeyboardBuilder()
+        for report in reports:
+            # Форматируем дату отчета
+            report_date = report.date.strftime('%d.%m.%Y')
+            # Получаем название объекта
+            object_name = report.object.name if report.object else "Неизвестный объект"
+            
+            keyboard.row(
+                InlineKeyboardButton(
+                    text=f"📄 {object_name} от {report_date}",
+                    callback_data=f"select_report_for_export_{report.id}"
+                )
+            )
+        
+        # Добавляем кнопку "Назад"
+        keyboard.row(InlineKeyboardButton(text="◀️ Назад", callback_data="admin_report_menu"))
+        
+        await callback.message.edit_text(
+            "Выберите отчет для экспорта:",
+            reply_markup=keyboard.as_markup()
+        )
+        
+    except Exception as e:
+        logging.error(f"Ошибка при получении списка отчетов: {str(e)}", exc_info=True)
+        await callback.message.edit_text(
+            f"❌ Произошла ошибка при получении списка отчетов: {str(e)}",
+            reply_markup=await get_admin_report_menu_keyboard()
+        )
+
+@admin_report_router.callback_query(F.data.startswith("select_report_for_export_"))
+@error_handler
+@with_session
+async def process_select_report_for_export(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Обработка выбора отчета для экспорта"""
+    try:
+        # Получаем ID отчета из callback_data
+        report_id = int(callback.data.split("_")[-1])
+        
+        # Получаем отчет
+        report = await get_report_with_relations(session, report_id)
+        if not report:
+            await callback.message.edit_text(
+                "❌ Отчет не найден",
+                reply_markup=await get_admin_report_menu_keyboard()
+            )
+            return
+        
+        # Сохраняем ID отчета в состоянии
+        await state.update_data(selected_report_id=report_id)
+        
+        # Показываем меню выбора формата экспорта
+        keyboard = InlineKeyboardBuilder()
+        keyboard.row(
+            InlineKeyboardButton(text="📄 Экспорт в PDF", callback_data="export_pdf"),
+            InlineKeyboardButton(text="📊 Экспорт в Excel", callback_data="export_excel")
+        )
+        keyboard.row(InlineKeyboardButton(text="◀️ Назад", callback_data="admin_report_menu"))
+        
+        # Форматируем дату отчета
+        report_date = report.date.strftime('%d.%m.%Y')
+        object_name = report.object.name if report.object else "Неизвестный объект"
+        
+        await callback.message.edit_text(
+            f"Выбран отчет:\n"
+            f"📅 Дата: {report_date}\n"
+            f"🏗 Объект: {object_name}\n\n"
+            f"Выберите формат экспорта:",
+            reply_markup=keyboard.as_markup()
+        )
+        
+    except Exception as e:
+        logging.error(f"Ошибка при выборе отчета: {str(e)}", exc_info=True)
+        await callback.message.edit_text(
+            f"❌ Произошла ошибка при выборе отчета: {str(e)}",
+            reply_markup=await get_admin_report_menu_keyboard()
+        )
+
+@admin_report_router.callback_query(F.data.in_(["export_pdf", "export_excel"]))
+@error_handler
+@with_session
+async def process_export_reports(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Обработка экспорта отчетов"""
+    try:
+        # Получаем ID выбранного отчета из состояния
+        data = await state.get_data()
+        report_id = data.get('selected_report_id')
+        
+        if not report_id:
+            await callback.message.edit_text(
+                "❌ Отчет не выбран",
+                reply_markup=await get_admin_report_menu_keyboard()
+            )
+            return
+        
+        # Получаем отчет со всеми связями
+        report = await get_report_with_relations(session, report_id)
+        if not report:
+            await callback.message.edit_text(
+                "❌ Отчет не найден",
+                reply_markup=await get_admin_report_menu_keyboard()
+            )
+            return
+        
+        # Загружаем все связанные данные
+        await session.refresh(report, ['object', 'itr_personnel', 'workers', 'equipment', 'photos'])
+        
+        # Создаем директорию для экспорта, если её нет
+        export_dir = os.path.join(settings.MEDIA_ROOT, 'exports')
+        os.makedirs(export_dir, exist_ok=True)
+        
+        # Генерируем имя файла
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        object_name = report.object.name if report.object else "unknown"
+        
+        if callback.data == "export_pdf":
+            # Экспорт в PDF
+            output_path = os.path.join(export_dir, f'report_{object_name}_{timestamp}.pdf')
+            export_report_to_pdf([report], output_path)
+            file_type = "PDF"
+        else:
+            # Экспорт в Excel
+            output_path = os.path.join(export_dir, f'report_{object_name}_{timestamp}.xlsx')
+            export_report_to_excel([report], output_path)
+            file_type = "Excel"
+        
+        # Отправляем файл
+        with open(output_path, 'rb') as file:
+            file_content = file.read()
+            input_file = BufferedInputFile(file_content, filename=os.path.basename(output_path))
+            await callback.message.answer_document(
+                document=input_file,
+                caption=f"✅ Отчет успешно экспортирован в {file_type}"
+            )
+        
+        # Удаляем временный файл
+        os.remove(output_path)
+        
+        # Возвращаемся в меню администратора
+        await callback.message.edit_text(
+            "Выберите действие:",
+            reply_markup=await get_admin_report_menu_keyboard()
+        )
+        
+    except Exception as e:
+        logging.error(f"Ошибка при экспорте отчета: {str(e)}", exc_info=True)
+        await callback.message.edit_text(
+            f"❌ Произошла ошибка при экспорте отчета: {str(e)}",
+            reply_markup=await get_admin_report_menu_keyboard()
+        )

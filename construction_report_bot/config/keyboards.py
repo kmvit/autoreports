@@ -112,11 +112,17 @@ def get_object_back_keyboard() -> InlineKeyboardMarkup:
 
 # Дополнительные клавиатуры для администратора
 async def get_admin_report_menu_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура меню отчетов администратора"""
+    """Клавиатура меню администратора для отчетов"""
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="Создать отчет", callback_data="create_report"))
-    builder.row(InlineKeyboardButton(text="Мои отчеты", callback_data="my_reports"))
-    builder.row(InlineKeyboardButton(text="Направить отчет", callback_data="send_report"))
+    builder.row(
+        InlineKeyboardButton(text="📝 Создать отчет", callback_data="create_report"),
+        InlineKeyboardButton(text="📋 Мои отчеты", callback_data="my_reports")
+    )
+    builder.row(
+        InlineKeyboardButton(text="📤 Отправить отчет", callback_data="send_report"),
+        InlineKeyboardButton(text="📊 Экспорт отчетов", callback_data="export_report")
+    )
+    builder.row(InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_main"))
     return builder.as_markup()
 
 async def get_objects_keyboard(session: AsyncSession) -> InlineKeyboardMarkup:

@@ -373,9 +373,6 @@ async def get_all_reports(session: AsyncSession, user_id: Optional[int] = None) 
     """Получение всех отчетов"""
     query = select(Report)
     
-    if user_id:
-        query = query.where(Report.user_id == user_id)
-    
     query = query.order_by(Report.date.desc())
     result = await session.execute(query)
     return result.scalars().all()
@@ -469,4 +466,20 @@ async def get_report_with_relations(session: AsyncSession, report_id: int) -> Op
         return report
     except Exception as e:
         logging.error(f"Ошибка при получении отчета #{report_id}: {str(e)}")
-        return None 
+        return None
+
+async def get_reports_for_export(session: AsyncSession) -> List[Report]:
+    """Получение отчетов со всеми необходимыми связями для экспорта"""
+    query = (
+        select(Report)
+        .options(
+            joinedload(Report.object),
+            joinedload(Report.itr_personnel),
+            joinedload(Report.workers),
+            joinedload(Report.equipment),
+            joinedload(Report.photos)
+        )
+        .order_by(Report.date.desc())
+    )
+    result = await session.execute(query)
+    return result.scalars().unique().all() 
