@@ -1,0 +1,16 @@
+[flake8]
+max-line-length = 100
+exclude = .git,__pycache__,build,dist,venv
+per-file-ignores =
+    __init__.py: D104
+    tests/*: D100,D101,D102,D103
+extend-ignore = 
+    D100,  # Missing docstring in public module
+    D104,  # Missing docstring in public package
+    W293,  # Blank line contains whitespace
+    W291,  # Trailing whitespace
+    W292,  # No newline at end of file
+    Q000,  # Double quotes found but single quotes preferred
+max-complexity = 10
+docstring-convention = google
+quotes = single 

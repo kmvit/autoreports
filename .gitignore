@@ -1,0 +1,44 @@
+# Виртуальное окружение
+venv/
+env/
+ENV/
+.env
+
+# Кэш Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Логи и временные файлы
+*.log
+logs/
+tmp/
+temp/
+
+# Файлы IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Файлы базы данных
+*.db
+*.sqlite
+*.sqlite3
+
+# Медиафайлы и загруженные данные
+media/
+uploads/
+
+# Файлы конфигурации с секретами
+config/secrets.py
+config/local_settings.py
+
+# Файлы сборки
+build/
+dist/
+*.egg-info/ 
