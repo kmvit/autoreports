@@ -175,17 +175,27 @@ async def get_work_subtype_keyboard(report_type: str) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-async def get_report_actions_keyboard() -> InlineKeyboardMarkup:
+async def get_report_actions_keyboard(report_id: int) -> InlineKeyboardMarkup:
     """Клавиатура действий с отчетом"""
-    builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="Добавить ИТР", callback_data="add_itr"))
-    builder.row(InlineKeyboardButton(text="Добавить рабочих", callback_data="add_workers"))
-    builder.row(InlineKeyboardButton(text="Добавить технику", callback_data="add_equipment"))
-    builder.row(InlineKeyboardButton(text="Добавить фотографии", callback_data="add_photos"))
-    builder.row(InlineKeyboardButton(text="Добавить комментарии", callback_data="add_comments"))
-    builder.row(InlineKeyboardButton(text="Сохранить отчет", callback_data="save_report"))
-    builder.row(InlineKeyboardButton(text="Отмена", callback_data="cancel_report"))
-    return builder.as_markup()
+    keyboard = [
+        [
+            InlineKeyboardButton(text="➕ Добавить ИТР", callback_data="add_itr"),
+            InlineKeyboardButton(text="➕ Добавить рабочих", callback_data="add_workers")
+        ],
+        [
+            InlineKeyboardButton(text="➕ Добавить технику", callback_data="add_equipment"),
+            InlineKeyboardButton(text="➕ Добавить фото", callback_data="add_photos")
+        ],
+        [
+            InlineKeyboardButton(text="📝 Добавить комментарии", callback_data="add_comments"),
+            InlineKeyboardButton(text="📄 Экспорт в PDF", callback_data=f"export_pdf_{report_id}")
+        ],
+        [
+            InlineKeyboardButton(text="💾 Сохранить", callback_data="save_report"),
+            InlineKeyboardButton(text="❌ Отменить", callback_data="cancel_report")
+        ]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 async def get_itr_keyboard(itr_list: List[ITR], selected_ids: List[int] = None) -> InlineKeyboardMarkup:
     """Клавиатура выбора ИТР"""

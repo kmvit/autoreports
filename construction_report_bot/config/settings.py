@@ -12,6 +12,9 @@ load_dotenv()
 class Settings(BaseSettings):
     """Настройки приложения."""
     
+    # Базовые настройки
+    BASE_DIR: str = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    
     # Настройки бота
     BOT_TOKEN: str = Field(..., env='BOT_TOKEN')
     ADMIN_USER_IDS: str = Field('', env='ADMIN_USER_IDS')

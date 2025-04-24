@@ -29,7 +29,7 @@ async def get_reports_by_date_range(
 ) -> List[Report]:
     """Получение отчетов за период с опциональной фильтрацией"""
     query = select(Report).where(
-        Report.created_at.between(start_date, end_date)
+        Report.date.between(start_date, end_date)
     )
     
     if client_id:
@@ -57,8 +57,8 @@ async def generate_report_summary(
         "total_reports": total_reports,
         "unique_clients": len(clients),
         "unique_objects": len(objects),
-        "period_start": min(r.created_at for r in reports),
-        "period_end": max(r.created_at for r in reports)
+        "period_start": min(r.date for r in reports),
+        "period_end": max(r.date for r in reports)
     }
 
 async def format_report_message(

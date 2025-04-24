@@ -2,6 +2,14 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 import logging
+import os
+import pandas as pd
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
+from reportlab.lib.units import inch
+from sqlalchemy import select
 
 from construction_report_bot.database.models import Report, ReportPhoto, ITR, Worker, Equipment, Object
 from construction_report_bot.database.crud import (
@@ -17,8 +25,14 @@ from construction_report_bot.database.crud import (
     get_equipment_by_id,
     get_object_by_id,
     add_report_photo,
-    get_report_with_relations
+    get_report_with_relations,
+    get_all_itr,
+    get_all_workers,
+    get_all_equipment
 )
+from construction_report_bot.config.settings import settings
+
+logger = logging.getLogger(__name__)
 
 class ReportService:
     """Сервис для работы с отчетами"""
@@ -256,4 +270,194 @@ class ReportService:
         except Exception as e:
             # Логируем ошибку и пробрасываем дальше
             logging.error(f"Ошибка при создании/обновлении отчета: {str(e)}", exc_info=True)
-            raise 
+            raise
+
+    @staticmethod
+    async def export_report(session: AsyncSession, report: Report) -> Optional[str]:
+        """
+        Экспортирует отчет в PDF формат
+        
+        Args:
+            session: Сессия базы данных
+            report: Объект отчета
+            
+        Returns:
+            str: Путь к созданному PDF файлу или None в случае ошибки
+        """
+        try:
+            # Создаем директорию для экспорта если её нет
+            export_dir = os.path.join(settings.BASE_DIR, "exports")
+            os.makedirs(export_dir, exist_ok=True)
+            
+            # Формируем имя файла
+            filename = f"report_{report.id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            filepath = os.path.join(export_dir, filename)
+            
+            # Получаем связанные данные
+            object_query = select(Object).where(Object.id == report.object_id)
+            result = await session.execute(object_query)
+            object = result.scalar_one_or_none()
+            
+            # Создаем документ
+            doc = SimpleDocTemplate(
+                filepath,
+                pagesize=A4,
+                rightMargin=72,
+                leftMargin=72,
+                topMargin=72,
+                bottomMargin=72
+            )
+            
+            # Получаем стили
+            styles = getSampleStyleSheet()
+            title_style = ParagraphStyle(
+                'CustomTitle',
+                parent=styles['Heading1'],
+                fontSize=16,
+                spaceAfter=30
+            )
+            
+            # Создаем элементы документа
+            elements = []
+            
+            # Заголовок
+            elements.append(Paragraph(f"Отчет №{report.id}", title_style))
+            elements.append(Spacer(1, 12))
+            
+            # Основная информация
+            data = [
+                ["Дата:", report.date.strftime("%d.%m.%Y")],
+                ["Тип отчета:", report.type],
+                ["Объект:", object.name if object else "Не указан"],
+                ["Статус:", report.status]
+            ]
+            
+            # Создаем таблицу
+            table = Table(data, colWidths=[2*inch, 4*inch])
+            table.setStyle(TableStyle([
+                ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+                ('FONTNAME', (0,0), (0,-1), 'Helvetica-Bold'),
+                ('FONTSIZE', (0,0), (-1,-1), 10),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 12),
+                ('TOPPADDING', (0,0), (-1,-1), 12),
+                ('GRID', (0,0), (-1,-1), 1, colors.black)
+            ]))
+            
+            elements.append(table)
+            elements.append(Spacer(1, 20))
+            
+            # Описание
+            if report.comments:
+                elements.append(Paragraph("Комментарии:", styles['Heading2']))
+                elements.append(Paragraph(report.comments, styles['Normal']))
+                elements.append(Spacer(1, 20))
+            
+            # Строим документ
+            doc.build(elements)
+            
+            return filepath
+            
+        except Exception as e:
+            logger.error(f"Ошибка при экспорте отчета в PDF: {e}")
+            return None
+    
+    @staticmethod
+    async def export_reports(session: AsyncSession, reports: List[Report]) -> Optional[str]:
+        """
+        Экспортирует список отчетов в Excel файл
+        
+        Args:
+            session: Сессия базы данных
+            reports: Список объектов отчетов
+            
+        Returns:
+            str: Путь к созданному файлу или None в случае ошибки
+        """
+        try:
+            # Создаем директорию для экспорта, если её нет
+            export_dir = os.path.join(settings.BASE_DIR, "exports")
+            os.makedirs(export_dir, exist_ok=True)
+            
+            # Формируем имя файла
+            filename = f"reports_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            filepath = os.path.join(export_dir, filename)
+            
+            # Создаем Excel writer
+            with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
+                # Сводная информация по всем отчетам
+                summary_data = []
+                for report in reports:
+                    summary_data.append({
+                        'ID отчета': report.id,
+                        'Дата создания': report.date.strftime('%d.%m.%Y %H:%M'),
+                        'Статус': report.status,
+                        'Комментарий': report.comments or 'Нет',
+                        'Количество фотографий': len(report.photos),
+                        'Количество ИТР': len(report.itr_personnel),
+                        'Количество рабочих': len(report.workers),
+                        'Количество техники': len(report.equipment)
+                    })
+                pd.DataFrame(summary_data).to_excel(writer, sheet_name='Сводка', index=False)
+                
+                # Детальная информация по каждому отчету
+                for report in reports:
+                    sheet_name = f'Отчет_{report.id}'
+                    
+                    # Основная информация
+                    main_data = {
+                        'Поле': [
+                            'ID отчета',
+                            'Дата создания',
+                            'Статус',
+                            'Комментарий',
+                            'Количество фотографий',
+                            'Количество ИТР',
+                            'Количество рабочих',
+                            'Количество техники'
+                        ],
+                        'Значение': [
+                            report.id,
+                            report.date.strftime('%d.%m.%Y %H:%M'),
+                            report.status,
+                            report.comments or 'Нет',
+                            len(report.photos),
+                            len(report.itr_personnel),
+                            len(report.workers),
+                            len(report.equipment)
+                        ]
+                    }
+                    pd.DataFrame(main_data).to_excel(writer, sheet_name=sheet_name, index=False)
+                    
+                    # Информация об ИТР
+                    if report.itr_personnel:
+                        itr_data = []
+                        for itr in report.itr_personnel:
+                            itr_data.append({
+                                'ФИО': itr.full_name
+                            })
+                        pd.DataFrame(itr_data).to_excel(writer, sheet_name=f'{sheet_name}_ИТР', index=False)
+                    
+                    # Информация о рабочих
+                    if report.workers:
+                        worker_data = []
+                        for worker in report.workers:
+                            worker_data.append({
+                                'ФИО': worker.full_name,
+                                'Должность': worker.position
+                            })
+                        pd.DataFrame(worker_data).to_excel(writer, sheet_name=f'{sheet_name}_Рабочие', index=False)
+                    
+                    # Информация о технике
+                    if report.equipment:
+                        equipment_data = []
+                        for equip in report.equipment:
+                            equipment_data.append({
+                                'Наименование': equip.name
+                            })
+                        pd.DataFrame(equipment_data).to_excel(writer, sheet_name=f'{sheet_name}_Техника', index=False)
+            
+            return filepath
+            
+        except Exception as e:
+            logger.error(f"Ошибка при экспорте отчетов: {str(e)}", exc_info=True)
+            return None 

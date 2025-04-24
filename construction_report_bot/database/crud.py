@@ -229,9 +229,14 @@ async def get_report_by_id(session: AsyncSession, report_id: int) -> Optional[Re
     result = await session.execute(select(Report).where(Report.id == report_id))
     return result.scalars().first()
 
-async def get_reports_by_object(session: AsyncSession, object_id: int) -> List[Report]:
+async def get_reports_by_object(session: AsyncSession, object_id: int, user_id: int) -> List[Report]:
     """Получение отчетов по объекту"""
-    result = await session.execute(select(Report).where(Report.object_id == object_id))
+    query = select(Report).where(
+        Report.object_id == object_id,
+        Report.user_id == user_id
+    ).order_by(Report.date.desc())
+    
+    result = await session.execute(query)
     return result.scalars().all()
 
 async def get_today_reports(session: AsyncSession, object_id: Optional[int] = None) -> List[Report]:
@@ -379,15 +384,15 @@ async def get_all_reports(session: AsyncSession, user_id: Optional[int] = None) 
 
 async def get_reports_by_date(session: AsyncSession, date: datetime) -> List[Report]:
     """Получение отчетов по дате"""
-    start_date = datetime(date.year, date.month, date.day, 0, 0, 0)
-    end_date = datetime(date.year, date.month, date.day, 23, 59, 59)
+    # Получаем начало и конец дня
+    start_date = date.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_date = date.replace(hour=23, minute=59, second=59, microsecond=999999)
     
-    result = await session.execute(
-        select(Report).where(
-            Report.date >= start_date,
-            Report.date <= end_date
-        ).order_by(Report.date.desc())
-    )
+    query = select(Report).where(
+        Report.date.between(start_date, end_date)
+    ).order_by(Report.date.desc())
+    
+    result = await session.execute(query)
     return result.scalars().all()
 
 async def get_reports_by_status(session: AsyncSession, status: str) -> List[Report]:
@@ -397,11 +402,14 @@ async def get_reports_by_status(session: AsyncSession, status: str) -> List[Repo
     )
     return result.scalars().all()
 
-async def get_reports_by_type(session: AsyncSession, report_type: str) -> List[Report]:
-    """Получение отчетов по типу"""
-    result = await session.execute(
-        select(Report).where(Report.type == report_type).order_by(Report.date.desc())
-    )
+async def get_reports_by_type(session: AsyncSession, report_type: str, user_id: int) -> List[Report]:
+    """Получение отчетов по типу (Утро/Вечер)"""
+    query = select(Report).where(
+        Report.type == report_type,
+        Report.user_id == user_id
+    ).order_by(Report.date.desc())
+    
+    result = await session.execute(query)
     return result.scalars().all()
 
 async def get_reports_by_work_type(session: AsyncSession, report_type: str, work_subtype: Optional[str] = None) -> List[Report]:
@@ -449,7 +457,8 @@ async def get_report_with_relations(session: AsyncSession, report_id: int) -> Op
                 selectinload(Report.object),
                 selectinload(Report.itr_personnel),
                 selectinload(Report.workers),
-                selectinload(Report.equipment)
+                selectinload(Report.equipment),
+                selectinload(Report.photos)
             )
             .where(Report.id == report_id)
         )
@@ -465,7 +474,7 @@ async def get_report_with_relations(session: AsyncSession, report_id: int) -> Op
         
         return report
     except Exception as e:
-        logging.error(f"Ошибка при получении отчета #{report_id}: {str(e)}")
+        logging.error(f"Ошибка при получении отчета #{report_id}: {str(e)}", exc_info=True)
         return None
 
 async def get_reports_for_export(session: AsyncSession) -> List[Report]:
@@ -482,4 +491,41 @@ async def get_reports_for_export(session: AsyncSession) -> List[Report]:
         .order_by(Report.date.desc())
     )
     result = await session.execute(query)
-    return result.scalars().unique().all() 
+    return result.scalars().unique().all()
+
+async def get_reports_by_date_range(session: AsyncSession, start_date: datetime, end_date: datetime) -> List[Report]:
+    """
+    Получение отчетов за период
+    
+    Args:
+        session: Сессия базы данных
+        start_date: Начальная дата периода
+        end_date: Конечная дата периода
+        
+    Returns:
+        List[Report]: Список отчетов за период
+    """
+    try:
+        query = (
+            select(Report)
+            .where(Report.date >= start_date)
+            .where(Report.date <= end_date)
+            .order_by(Report.date.desc())
+        )
+        result = await session.execute(query)
+        return result.scalars().all()
+    except Exception as e:
+        logger.error(f"Ошибка при получении отчетов за период {start_date} - {end_date}: {str(e)}")
+        return []
+
+async def get_reports_by_itr(session: AsyncSession, itr_id: int, user_id: int) -> List[Report]:
+    """Получение отчетов по ИТР"""
+    query = select(Report).join(
+        Report.itr_personnel
+    ).where(
+        Report.itr_personnel.any(id=itr_id),
+        Report.user_id == user_id
+    ).order_by(Report.date.desc())
+    
+    result = await session.execute(query)
+    return result.scalars().all() 

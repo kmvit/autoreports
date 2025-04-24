@@ -16,4 +16,10 @@ class ReportStates(StatesGroup):
     confirm_report = State()
     edit_report = State()  # Состояние для редактирования отчета
     select_report_to_send = State()  # Выбор отчета для отправки
-    select_report_recipient = State()  # Выбор получателя отчета 
+    select_report_recipient = State()  # Выбор получателя отчета
+    waiting_for_date = State()  # Ожидание ввода даты для фильтрации
+
+class ReportManagementStates(StatesGroup):
+    """Состояния для управления отчетами"""
+    waiting_for_type = State()
+    waiting_for_filter = State() 
