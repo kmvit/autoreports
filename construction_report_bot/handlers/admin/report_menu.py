@@ -16,7 +16,8 @@ from construction_report_bot.database.crud import (
     get_reports_by_object,
     get_reports_by_itr,
     get_reports_by_type,
-    get_reports_by_date
+    get_reports_by_date,
+    get_object_by_id
 )
 from construction_report_bot.config.keyboards import get_admin_report_menu_keyboard, get_back_keyboard
 from construction_report_bot.utils.decorators import error_handler, with_session
@@ -105,9 +106,10 @@ async def process_date_filter(message: Message, session: AsyncSession, state: FS
             # Формируем клавиатуру с отчетами
             keyboard = []
             for report in reports:
+                report_object = await get_object_by_id(session, report.object_id)
                 # Добавляем эмодзи в зависимости от статуса
                 status_emoji = "✅" if report.status == "completed" else "📝"
-                button_text = f"{status_emoji} {report.type} от {report.date.strftime('%d.%m.%Y %H:%M')}"
+                button_text = f"{status_emoji} {report_object.name} {report.type} от {report.date.strftime('%d.%m.%Y %H:%M')}"
                 callback_data = f"edit_report_{report.id}"
                 keyboard.append([InlineKeyboardButton(text=button_text, callback_data=callback_data)])
             
@@ -149,11 +151,19 @@ async def show_all_reports(callback: CallbackQuery, session: AsyncSession):
         # Формируем клавиатуру с отчетами
         keyboard = []
         for report in reports:
+
+            report_object = await get_object_by_id(session, report.object_id)
+            
             # Добавляем эмодзи в зависимости от статуса
-            status_emoji = "✅" if report.status == "completed" else "📝"
-            button_text = f"{status_emoji} {report.type} от {report.date.strftime('%d.%m.%Y %H:%M')}"
+            status_emoji = "✅" if report.status == "sent" else "📝"
+            button_text = f"{status_emoji} {report_object.name} {report.type} от {report.date.strftime('%d.%m.%Y %H:%M')}"
             callback_data = f"edit_report_{report.id}"
             keyboard.append([InlineKeyboardButton(text=button_text, callback_data=callback_data)])
+            
+            # Добавляем кнопку удаления для каждого отчета
+            delete_button_text = f"🗑️ Удалить"
+            delete_callback_data = f"delete_report_{report.id}"
+            keyboard.append([InlineKeyboardButton(text=delete_button_text, callback_data=delete_callback_data)])
         
         # Добавляем кнопку "Назад"
         keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data="my_reports")])

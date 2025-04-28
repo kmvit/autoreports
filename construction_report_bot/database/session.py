@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import AsyncAdaptedQueuePool
 from construction_report_bot.config.settings import settings
 from .models import Base
 
@@ -9,14 +9,18 @@ engine = create_async_engine(
     settings.DATABASE_URL,
     echo=True,
     future=True,
-    poolclass=NullPool
+    poolclass=AsyncAdaptedQueuePool,
+    pool_size=5,
+    max_overflow=10
 )
 
 # Создаем фабрику асинхронных сессий
 async_session = sessionmaker(
     engine, 
     class_=AsyncSession, 
-    expire_on_commit=False
+    expire_on_commit=False,
+    autocommit=False,
+    autoflush=False
 )
 
 async def create_db_session():
@@ -27,9 +31,15 @@ async def create_db_session():
 async def get_session() -> AsyncSession:
     """Получение сессии для работы с базой данных"""
     async with async_session() as session:
-        yield session 
+        try:
+            yield session
+        finally:
+            await session.close()
 
 async def get_async_session() -> AsyncSession:
     """Получить асинхронную сессию"""
     async with async_session() as session:
-        yield session 
+        try:
+            yield session
+        finally:
+            await session.close() 

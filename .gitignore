@@ -1,44 +1,84 @@
-# Виртуальное окружение
-venv/
-env/
-ENV/
-.env
-
-# Кэш Python
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
-.pytest_cache/
-.coverage
-htmlcov/
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
-# Логи и временные файлы
-*.log
-logs/
-tmp/
-temp/
+# Виртуальное окружение
+venv/
+ENV/
+env/
+.env
 
-# Файлы IDE
+# IDE
 .idea/
 .vscode/
 *.swp
 *.swo
-.DS_Store
+.project
+.pydevproject
+.settings/
 
-# Файлы базы данных
+# Логи и временные файлы
+*.log
+logs/
+temp/
+tmp/
+*.tmp
+*.bak
+*.swp
+*~
+
+# Файлы конфигурации с секретами
+config.ini
+settings.ini
+*.env
+.env.*
+
+# Медиафайлы и загрузки
+media/
+uploads/
+downloads/
+reports/
+exports/
+
+# База данных
 *.db
 *.sqlite
 *.sqlite3
 
-# Медиафайлы и загруженные данные
-media/
-uploads/
+# Системные файлы
+.DS_Store
+Thumbs.db
+desktop.ini
 
-# Файлы конфигурации с секретами
-config/secrets.py
-config/local_settings.py
+# Файлы документации
+docs/_build/
+docs/_static/
+docs/_templates/
 
-# Файлы сборки
-build/
-dist/
-*.egg-info/ 
+# Кэш и временные файлы pytest
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/ 

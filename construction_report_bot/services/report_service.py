@@ -9,9 +9,9 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from reportlab.lib.units import inch
-from sqlalchemy import select
+from sqlalchemy import select, delete
 
-from construction_report_bot.database.models import Report, ReportPhoto, ITR, Worker, Equipment, Object
+from construction_report_bot.database.models import Report, ReportPhoto, ITR, Worker, Equipment, Object, report_equipment
 from construction_report_bot.database.crud import (
     create_report, 
     get_report_by_id, 
@@ -86,7 +86,6 @@ class ReportService:
             # Добавляем ИТР в отчет
             report.itr_personnel = itrs
             await session.commit()
-            await session.refresh(report)
             
             return report
         except Exception as e:
@@ -100,9 +99,14 @@ class ReportService:
         report_id: int,
         worker_ids: List[int]
     ) -> Report:
-        """Добавляет рабочих в отчет"""
+        """Добавляет или обновляет список рабочих в отчете"""
         # Получаем отчет
         report = await get_report_by_id(session, report_id)
+        if not report:
+            return None
+        
+        # Очищаем текущий список рабочих
+        report.workers = []
         
         # Получаем объекты рабочих
         workers = []
@@ -111,8 +115,8 @@ class ReportService:
             if worker:
                 workers.append(worker)
         
-        # Добавляем рабочих в отчет
-        report.workers.extend(workers)
+        # Устанавливаем новый список рабочих
+        report.workers = workers
         await session.commit()
         
         return report
@@ -123,23 +127,52 @@ class ReportService:
         report_id: int,
         equipment_data: List[Dict[str, Any]]
     ) -> Report:
-        """Добавляет технику в отчет"""
-        # Получаем отчет
-        report = await get_report_by_id(session, report_id)
-        
-        # Получаем объекты техники
-        equipment_list = []
-        for item in equipment_data:
-            equipment_id = item.get("equipment_id")
-            equipment = await get_equipment_by_id(session, equipment_id)
-            if equipment:
-                equipment_list.append(equipment)
-        
-        # Добавляем технику в отчет
-        report.equipment = equipment_list
-        await session.commit()
-        
-        return report
+        """Добавляет или обновляет список техники в отчете"""
+        try:
+            # Получаем отчет с отношениями
+            report = await get_report_with_relations(session, report_id)
+            
+            if not report:
+                logging.error(f"Отчет с ID {report_id} не найден")
+                return None
+            
+            # Очищаем текущий список техники через явные запросы к связующей таблице
+            # Используем низкоуровневое удаление вместо обращения к ORM
+            await session.execute(
+                delete(report_equipment).where(report_equipment.c.report_id == report_id)
+            )
+            await session.flush()
+            
+            # Добавляем новое оборудование через отдельные запросы
+            equipment_list = []
+            logging.info(f"Добавление техники в отчет #{report_id}. Список techники: {equipment_data}")
+            
+            for item in equipment_data:
+                equipment_id = item.get("equipment_id")
+                equipment = await get_equipment_by_id(session, equipment_id)
+                
+                if equipment:
+                    equipment_list.append(equipment)
+                    # Добавляем связь в ассоциативную таблицу
+                    await session.execute(
+                        report_equipment.insert().values(
+                            report_id=report_id,
+                            equipment_id=equipment_id
+                        )
+                    )
+                    logging.info(f"Техника {equipment_id} ({equipment.name}) добавлена в отчет #{report_id}")
+            
+            await session.commit()
+            
+            # Загружаем обновленный отчет
+            updated_report = await get_report_with_relations(session, report_id)
+            logging.info(f"Обновлен отчет #{report_id}. Добавлено единиц техники: {len(equipment_list)}")
+            return updated_report
+            
+        except Exception as e:
+            logging.error(f"Ошибка при добавлении техники в отчет: {str(e)}", exc_info=True)
+            await session.rollback()
+            return None
     
     @staticmethod
     async def add_photos_to_report(

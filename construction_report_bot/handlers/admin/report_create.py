@@ -17,6 +17,7 @@ from construction_report_bot.database.crud import (
 )
 from construction_report_bot.database.models import Report, Object, ITR, Worker, Equipment
 from construction_report_bot.config.keyboards import (
+    get_admin_report_menu_keyboard,
     get_objects_keyboard,
     get_work_type_keyboard,
     get_work_subtype_keyboard,
@@ -28,6 +29,7 @@ from construction_report_bot.config.keyboards import (
     get_comments_keyboard,
     get_back_keyboard
 )
+from construction_report_bot.handlers.admin.report_edit import validate_report_data
 from construction_report_bot.utils.decorators import error_handler, with_session
 from construction_report_bot.middlewares.role_check import admin_required
 from construction_report_bot.utils.logging.logger import log_admin_action, log_error
@@ -41,6 +43,40 @@ admin_report_create_router = Router()
 # Добавляем middleware для проверки роли
 admin_report_create_router.message.middleware(admin_required())
 admin_report_create_router.callback_query.middleware(admin_required())
+
+# Словарь с русскими названиями типов работ
+WORK_TYPE_NAMES = {
+    "report_engineering": "Инженерные коммуникации",
+    "report_internal_networks": "Внутриплощадочные сети",
+    "work_landscaping": "Благоустройство",
+    "report_general_construction": "Общестроительные работы"
+}
+
+# Словарь с русскими названиями подтипов работ
+WORK_SUBTYPE_NAMES = {
+    "subtype_heating": "Отопление",
+    "subtype_water": "Водоснабжение и канализация",
+    "subtype_fire": "Пожаротушение",
+    "subtype_ventilation": "Вентиляция и кондиционирование",
+    "subtype_electricity": "Электроснабжение",
+    "subtype_low_current": "Слаботочные системы",
+    "subtype_nwc": "НВК",
+    "subtype_gnb": "Работы с ГНБ",
+    "subtype_es": "ЭС",
+    "subtype_monolith": "Монолит",
+    "subtype_excavation": "Устройство котлована",
+    "subtype_dismantling": "Демонтажные работы",
+    "subtype_masonry": "Кладочные работы",
+    "subtype_facade": "Фасадные работы",
+    "subtype_roofing": "Кровельные работы",
+    "subtype_finishing": "Отделочные работы",
+    "subtype_territory_improvement": "Благоустройство территории",
+    "subtype_landscaping": "Озеленение",
+    "subtype_paths": "Устройство дорожек",
+    "subtype_platforms": "Устройство площадок",
+    "subtype_fencing": "Устройство ограждений",
+    "subtype_maf": "Устройство малых архитектурных форм"
+}
 
 # Обработчик для начала создания отчета
 @admin_report_create_router.callback_query(F.data == "create_report")
@@ -163,19 +199,38 @@ async def process_report_type_selection(callback: CallbackQuery, state: FSMConte
     """Обработка выбора типа отчета"""
     await callback.answer()
     
-    # Сохраняем выбранный тип отчета
-    report_type = callback.data.replace("_report", "")
+    # Сохраняем выбранный тип отчета без удаления суффикса _report
+    report_type = callback.data
     logging.info(f"[process_report_type_selection] Выбран тип отчета: {report_type}")
     
     # Получаем данные отчета из состояния
     data = await state.get_data()
     logging.info(f"[process_report_type_selection] Данные из состояния перед созданием отчета: {data}")
     
+    # Получаем русские названия для типа и подтипа работ
+    work_type = data.get('work_type', 'general_construction')
+    work_subtype = data.get('work_subtype')
+    
+    # Преобразуем идентификаторы в русские названия
+    work_type_name = WORK_TYPE_NAMES.get(f"report_{work_type}", work_type)
+    work_subtype_name = WORK_SUBTYPE_NAMES.get(f"subtype_{work_subtype}", work_subtype) if work_subtype else None
+    
+    # Валидируем данные перед созданием отчета
+    await validate_report_data({
+        'object_id': data['object_id'],
+        'report_type': work_type_name,
+        'type': report_type,
+        'itr_list': [],
+        'workers_list': [],
+        'equipment_list': []
+    })
+    
     # Создаем базовый отчет
     report = await create_base_report(session, {
         'object_id': data['object_id'],
-        'report_type': report_type,
-        'work_type': data.get('work_type', 'general_construction')
+        'report_type': work_type_name,
+        'work_type': work_type_name,
+        'work_subtype': work_subtype_name
     })
     logging.info(f"[process_report_type_selection] Создан базовый отчет с ID: {report.id}")
     
@@ -185,8 +240,8 @@ async def process_report_type_selection(callback: CallbackQuery, state: FSMConte
         'object_id': data['object_id'],
         'report_type': report_type,
         'type': report_type,
-        'work_type': report_type,
-        'work_subtype': data.get('work_subtype'),
+        'work_type': work_type_name,
+        'work_subtype': work_subtype_name,
         'comments': data.get('comments', ''),
         'itr_list': [],
         'workers_list': [],
@@ -195,24 +250,29 @@ async def process_report_type_selection(callback: CallbackQuery, state: FSMConte
     await state.update_data(**state_data)
     
     # Проверяем обновленное состояние
-    updated_data = await state.get_data()
-    logging.info(f"[process_report_type_selection] Обновленные данные состояния: {updated_data}")
+    updated_state = await state.get_data()
+    logging.info(f"[process_report_type_selection] Обновленное состояние: {updated_state}")
     
-    # Получаем объект из базы данных
-    object = await get_object_by_id(session, data['object_id'])
+    # Показываем меню действий с отчетом
+    keyboard = await get_report_actions_keyboard(report.id)
     
-    # Отправляем сообщение об успешном создании отчета
+    # Формируем сообщение без использования сложных f-строк
+    message = f"✅ Отчет #{report.id} создан.\n\n"
+    message += f"Тип работ: {work_type_name}\n"
+    
+    # Добавляем подтип работ, если он есть
+    if work_subtype_name:
+        message += f"Подтип работ: {work_subtype_name}\n"
+    
+    message += "Выберите действие:"
+    
     await callback.message.edit_text(
-        f"✅ Отчет создан!\n\n"
-        f"ID отчета: {report.id}\n"
-        f"Объект: {object.name if object else 'Не указан'}\n"
-        f"Тип работ: {report.report_type}\n"
-        f"Время: {report.type}",
-        reply_markup=await get_report_actions_keyboard(report.id)
+        message,
+        reply_markup=keyboard
     )
     
     # Обновляем состояние
-    await state.set_state(ReportStates.select_actions)
+    await state.set_state(ReportStates.edit_report)
 
 # Обработчик возврата к выбору объекта
 @admin_report_create_router.callback_query(F.data == "back_to_object", ReportStates.select_work_type)

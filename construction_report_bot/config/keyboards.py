@@ -164,6 +164,14 @@ async def get_work_subtype_keyboard(report_type: str) -> InlineKeyboardMarkup:
             ["Фасадные работы", "subtype_facade"],
             ["Кровельные работы", "subtype_roofing"],
             ["Отделочные работы", "subtype_finishing"]
+        ],
+        "work_landscaping": [
+            ["Благоустройство территории", "subtype_territory_improvement"],
+            ["Озеленение", "subtype_landscaping"],
+            ["Устройство дорожек", "subtype_paths"],
+            ["Устройство площадок", "subtype_platforms"],
+            ["Устройство ограждений", "subtype_fencing"],
+            ["Устройство малых архитектурных форм", "subtype_maf"]
         ]
     }
     

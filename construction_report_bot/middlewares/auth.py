@@ -4,6 +4,8 @@ from typing import Dict, Any, Callable, Awaitable, AsyncGenerator
 from construction_report_bot.database.session import get_session
 from construction_report_bot.database.crud import get_user_by_telegram_id, create_user
 from construction_report_bot.config.settings import settings
+from construction_report_bot.handlers.common import AuthStates  # Добавляем импорт состояний
+from aiogram.fsm.context import FSMContext  # Добавляем импорт контекста FSM
 import logging
 
 class AuthMiddleware(BaseMiddleware):
@@ -72,11 +74,45 @@ class AuthMiddleware(BaseMiddleware):
                 if session:
                     await session.close()
                     logging.info("[AuthMiddleware] Admin Check: Session closed.")
+        else:
+            # Проверяем, является ли пользователь клиентом
+            logging.info("[AuthMiddleware] User is not ADMIN, checking if CLIENT")
+            session_gen: AsyncGenerator = get_session()
+            session = None
+            try:
+                session = await session_gen.__anext__()
+                user = await get_user_by_telegram_id(session, telegram_id)
+                if user and user.role == settings.CLIENT_ROLE:
+                    logging.info("[AuthMiddleware] User is CLIENT")
+                    data["user"] = user
+                    result = await handler(event, data)
+                    return result
+                else:
+                    logging.info("[AuthMiddleware] User is not CLIENT")
+            except Exception as e:
+                logging.error(f"[AuthMiddleware] Client Check Error: {e}")
+            finally:
+                if session:
+                    await session.close()
         
         logging.info("[AuthMiddleware] User is NOT ADMIN or check passed. Proceeding...")
+        
         # Для команды /start пропускаем проверку авторизации
         if isinstance(event, Message) and event.text and event.text.startswith('/start'):
             return await handler(event, data)
+        
+        # Получаем состояние FSM, если доступно
+        state = data.get("state")
+        
+        # Проверяем, находится ли пользователь в состоянии ожидания ввода кода доступа
+        if state:
+            current_state = await state.get_state()
+            logging.info(f"[AuthMiddleware] Current FSM state: {current_state}")
+            
+            # Если пользователь в состоянии ожидания кода доступа, пропускаем проверку авторизации
+            if current_state == "AuthStates:waiting_for_access_code":
+                logging.info("[AuthMiddleware] User is waiting for access code, bypassing auth check")
+                return await handler(event, data)
         
         # Получаем сессию БД из зависимостей
         session_gen: AsyncGenerator = get_session()

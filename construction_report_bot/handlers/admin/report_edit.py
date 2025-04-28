@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import Union
+from datetime import datetime
 
 from construction_report_bot.database.crud import (
     get_report_by_id,
@@ -132,7 +133,16 @@ async def process_edit_report(callback: CallbackQuery, state: FSMContext, sessio
         logging.info(f"[process_edit_report] Сохранены данные в состоянии: {state_data}")
         
         # Формируем информацию об отчете
-        report_info = (
+        if report.status == "sent":
+            report_info = (
+                f"✅ Отчет #{report.id} отправлен заказчику\n\n"
+                f"Тип: {report.type}\n"
+                f"Дата: {report.date.strftime('%d.%m.%Y %H:%M')}\n"
+                f"Статус: {report.status}\n"
+                f"Объект: {object.name if object else 'Не указан'}\n"
+            )
+        else:   
+            report_info = (
             f"📝 Редактирование отчета #{report.id}\n\n"
             f"Тип: {report.type}\n"
             f"Дата: {report.date.strftime('%d.%m.%Y %H:%M')}\n"
@@ -253,10 +263,13 @@ async def process_itr_selection(callback: CallbackQuery, state: FSMContext, sess
     # Отправляем ответ на callback
     await callback.answer(f"✅ Выбран ИТР: {itr.full_name}")
     
+    # Возвращаем к редактированию отчета
+    await state.set_state(ReportStates.edit_report)
+
+    
     # Отправляем новое сообщение с меню действий
     await callback.message.edit_text(
-        f"✅ ИТР {itr.full_name} успешно добавлен в отчет.\n\n"
-        f"Выберите действие для продолжения создания отчета:",
+        f"✅ ИТР {itr.full_name} успешно добавлен в отчет.\n\n{await format_report_info(report, callback.message.text)}\nВыберите действие:",
         reply_markup=await get_report_actions_keyboard(report_id)
     )
 
@@ -303,25 +316,19 @@ async def process_add_workers(callback: CallbackQuery, state: FSMContext, sessio
     # Получаем список ID рабочих, которые уже добавлены в отчет
     existing_worker_ids = [worker.id for worker in report.workers] if report.workers else []
     
-    # Фильтруем список рабочих, исключая тех, кто уже добавлен в отчет
-    available_workers = [worker for worker in all_workers if worker.id not in existing_worker_ids]
+    # Инициализируем список выбранных рабочих в состоянии
+    await state.update_data(workers_list=existing_worker_ids)
     
-    if not available_workers:
-        await callback.message.edit_text(
-            "❌ Все доступные рабочие уже добавлены в отчет.\n"
-            "Выберите другое действие:",
-            reply_markup=await get_report_actions_keyboard()
-        )
-        return
-    
-    # Формируем клавиатуру только с доступными рабочими
-    keyboard = await get_workers_keyboard(available_workers)
+    # Формируем клавиатуру со всеми рабочими, отмечая тех, кто уже добавлен в отчет
+    keyboard = await get_workers_keyboard(all_workers, selected_ids=existing_worker_ids)
     
     # Добавляем информацию о том, сколько рабочих уже в отчете
     existing_count = len(existing_worker_ids)
     message_text = f"Выберите рабочих для отчета:\n\n"
     if existing_count > 0:
         message_text += f"ℹ️ В отчете уже добавлено рабочих: {existing_count}\n\n"
+    message_text += "✅ - рабочие уже добавлены в отчет\n"
+    message_text += "Вы можете снять галочки, чтобы удалить рабочих из отчета, или отметить новых рабочих для добавления."
     
     await callback.message.edit_text(
         message_text,
@@ -355,14 +362,6 @@ async def process_worker_selection(callback: CallbackQuery, state: FSMContext, s
         await callback.answer("❌ Ошибка: отчет не найден", show_alert=True)
         return
     
-    # Получаем список ID рабочих, которые уже добавлены в отчет
-    existing_worker_ids = [worker.id for worker in report.workers] if report.workers else []
-    
-    # Проверяем, не добавлен ли уже этот рабочий в отчет
-    if worker_id in existing_worker_ids:
-        await callback.answer("❌ Этот рабочий уже добавлен в отчет", show_alert=True)
-        return
-    
     # Проверяем, есть ли изменения в текущем выборе
     was_selected = worker_id in workers_list
     
@@ -375,23 +374,21 @@ async def process_worker_selection(callback: CallbackQuery, state: FSMContext, s
     # Обновляем данные состояния
     await state.update_data(workers_list=workers_list)
     
-    # Получаем обновленный список рабочих
+    # Получаем обновленный список всех рабочих
     all_workers = await get_all_workers(session)
     
-    # Фильтруем список рабочих, исключая тех, кто уже добавлен в отчет
-    available_workers = [worker for worker in all_workers if worker.id not in existing_worker_ids]
-    
     # Формируем клавиатуру с отмеченными рабочими
-    keyboard = await get_workers_keyboard(available_workers, selected_ids=workers_list)
+    keyboard = await get_workers_keyboard(all_workers, selected_ids=workers_list)
     
     # Отправляем ответ на callback
     await callback.answer(f"{'Удален' if was_selected else 'Добавлен'} рабочий")
     
-    # Добавляем информацию о том, сколько рабочих уже в отчете
-    existing_count = len(existing_worker_ids)
+    # Добавляем информацию о том, сколько рабочих выбрано
+    selected_count = len(workers_list)
     message_text = f"Выберите рабочих для отчета:\n\n"
-    if existing_count > 0:
-        message_text += f"ℹ️ В отчете уже добавлено рабочих: {existing_count}\n\n"
+    message_text += f"ℹ️ Выбрано рабочих: {selected_count}\n\n"
+    message_text += "✅ - рабочие уже добавлены в отчет\n"
+    message_text += "Вы можете снять галочки, чтобы удалить рабочих из отчета, или отметить новых рабочих для добавления."
     
     # Отправляем новое сообщение
     await callback.message.edit_text(
@@ -428,15 +425,9 @@ async def process_workers_done(callback: CallbackQuery, state: FSMContext, sessi
         )
         return
     
-    # Получаем список ID рабочих, которые уже добавлены в отчет
-    existing_worker_ids = [worker.id for worker in report.workers] if report.workers else []
-    
-    # Объединяем списки ID рабочих, исключая дубликаты
-    all_worker_ids = list(set(existing_worker_ids + workers_list))
-    
-    # Получаем объекты всех рабочих
+    # Получаем объекты всех выбранных рабочих
     selected_workers = []
-    for worker_id in all_worker_ids:
+    for worker_id in workers_list:
         worker = await get_worker_by_id(session, worker_id)
         if worker:
             selected_workers.append(worker)
@@ -449,11 +440,11 @@ async def process_workers_done(callback: CallbackQuery, state: FSMContext, sessi
         )
         return
     
-    # Добавляем рабочих в отчет через ReportService
+    # Обновляем отчет с новым списком рабочих через ReportService
     updated_report = await ReportService.add_workers_to_report(
         session=session,
         report_id=report_id,
-        worker_ids=all_worker_ids
+        worker_ids=workers_list
     )
     
     if not updated_report:
@@ -463,29 +454,13 @@ async def process_workers_done(callback: CallbackQuery, state: FSMContext, sessi
             reply_markup=await get_main_menu_keyboard()
         )
         return
-    
-    # Формируем сообщение об успешном добавлении
-    workers_info = [f"• {worker.full_name} ({worker.position})" for worker in selected_workers]
-    
-    if workers_info:
-        names_text = ", ".join(workers_info)
-        await callback.message.edit_text(
-            f"✅ Рабочие успешно добавлены в отчет:\n{names_text}\n\n"
-            f"Выберите следующее действие:",
-            reply_markup=await get_report_actions_keyboard(report_id)
-        )
-    else:
-        await callback.message.edit_text(
-            "✅ Рабочие успешно добавлены в отчет.\n\n"
-            "Выберите следующее действие:",
-            reply_markup=await get_report_actions_keyboard(report_id)
-        )
-    
-    # Очищаем состояние
-    await state.clear()
-    
-    # Показываем страницу редактирования отчета
-    await show_report_edit_page(callback, report_id, session)
+    # Убираем состояние выбора рабочих, но сохраняем основные данные отчета
+    await state.set_state(ReportStates.edit_report)
+
+    await callback.message.edit_text(
+        f"✅ Рабочие успешно обновлены в отчете.\n\n{await format_report_info(report, callback.message.text)}\nВыберите действие:",
+        reply_markup=await get_report_actions_keyboard(report_id)
+    )
 
 # Обработчик добавления техники
 @admin_report_edit_router.callback_query(F.data == "add_equipment")
@@ -506,6 +481,15 @@ async def process_add_equipment(callback: CallbackQuery, state: FSMContext, sess
         )
         return
     
+    # Получаем отчет с текущей техникой
+    report = await get_report_with_relations(session, report_id)
+    if not report:
+        await callback.message.edit_text(
+            "❌ Отчет не найден",
+            reply_markup=await get_admin_report_menu_keyboard()
+        )
+        return
+    
     # Получаем список техники
     all_equipment = await get_all_equipment(session)
     
@@ -516,99 +500,30 @@ async def process_add_equipment(callback: CallbackQuery, state: FSMContext, sess
         )
         return
     
-    # Инициализируем пустой список выбранной техники в состоянии
-    await state.update_data(equipment_list=[])
+    # Получаем список ID текущей техники из отчета
+    current_equipment_ids = [eq.id for eq in report.equipment] if report.equipment else []
+    
+    # Инициализируем список выбранной техники в состоянии текущими значениями
+    await state.update_data(equipment_list=current_equipment_ids)
     
     # Устанавливаем состояние выбора техники
     await state.set_state(ReportStates.add_equipment)
     
-    # Формируем клавиатуру с техникой
-    keyboard = await get_equipment_keyboard(all_equipment, selected_ids=[])
+    # Формируем клавиатуру с техникой, отмечая уже выбранную
+    keyboard = await get_equipment_keyboard(all_equipment, selected_ids=current_equipment_ids)
+    
+    # Добавляем информацию о том, сколько техники уже в отчете
+    existing_count = len(current_equipment_ids)
+    message_text = f"Выберите технику для отчета:\n\n"
+    if existing_count > 0:
+        message_text += f"ℹ️ В отчете уже добавлено единиц техники: {existing_count}\n\n"
+    message_text += "✅ - техника уже добавлена в отчет\n"
+    message_text += "Вы можете снять галочки, чтобы удалить технику из отчета, или отметить новую технику для добавления."
     
     await callback.message.edit_text(
-        "Выберите технику для отчета:",
+        message_text,
         reply_markup=keyboard
     )
-
-async def show_report_edit_page(message: Union[Message, CallbackQuery], report_id: int, session: AsyncSession) -> None:
-    """
-    Показывает страницу редактирования отчета
-    
-    Args:
-        message: Сообщение или callback query для редактирования
-        report_id: ID отчета
-        session: Сессия базы данных
-    """
-    # Получаем отчет со всеми связями
-    report = await get_report_with_relations(session, report_id)
-    if not report:
-        if isinstance(message, CallbackQuery):
-            await message.message.edit_text(
-                "Отчет не найден",
-                reply_markup=await get_admin_report_menu_keyboard()
-            )
-        else:
-            await message.answer(
-                "Отчет не найден",
-                reply_markup=await get_admin_report_menu_keyboard()
-            )
-        return
-    
-    # Формируем информацию об отчете
-    report_info = (
-        f"📝 Редактирование отчета #{report.id}\n\n"
-        f"Тип: {report.type}\n"
-        f"Дата: {report.date.strftime('%d.%m.%Y %H:%M')}\n"
-        f"Статус: {report.status}\n"
-        f"Объект: {report.object.name}\n"
-    )
-    
-    # Добавляем тип работ, если есть
-    if report.report_type:
-        report_info += f"Тип работ: {report.report_type}\n"
-    
-    # Добавляем подтип работ, если есть
-    if report.work_subtype:
-        report_info += f"Подтип работ: {report.work_subtype}\n"
-    
-    # Добавляем ИТР, если есть
-    if report.itr_personnel:
-        itr_names = [itr.full_name for itr in report.itr_personnel]
-        if itr_names:
-            report_info += f"ИТР: {', '.join(itr_names)}\n"
-    
-    # Добавляем рабочих, если есть
-    if report.workers:
-        worker_names = [worker.full_name for worker in report.workers]
-        if worker_names:
-            report_info += f"Рабочие: {', '.join(worker_names)}\n"
-    
-    # Добавляем технику, если есть
-    if report.equipment:
-        equipment_names = [eq.name for eq in report.equipment]
-        if equipment_names:
-            report_info += f"Техника: {', '.join(equipment_names)}\n"
-    
-    # Добавляем фотографии, если есть
-    if report.photos:
-        photo_count = len(report.photos)
-        report_info += f"Фотографий: {photo_count}\n"
-    
-    # Добавляем комментарии, если есть
-    if report.comments:
-        report_info += f"Комментарий: {report.comments}\n"
-    
-    # Отправляем сообщение с информацией об отчете
-    if isinstance(message, CallbackQuery):
-        await message.message.edit_text(
-            f"{report_info}\nВыберите действие:",
-            reply_markup=await get_report_actions_keyboard(report_id)
-        )
-    else:
-        await message.answer(
-            f"{report_info}\nВыберите действие:",
-            reply_markup=await get_report_actions_keyboard(report_id)
-        )
 
 # Обработчик завершения выбора техники
 @admin_report_edit_router.callback_query(F.data == "equipment_done", ReportStates.add_equipment)
@@ -656,7 +571,7 @@ async def process_equipment_done(callback: CallbackQuery, state: FSMContext, ses
         # Получаем объекты техники и их имена
         equipment_names = []
         for eq_id in equipment_list:
-            equipment = await get_equipment_by_id(session, eq_id)
+            equipment = await session.get(Equipment, eq_id)
             if equipment:
                 equipment_names.append(equipment.name)
         
@@ -668,13 +583,13 @@ async def process_equipment_done(callback: CallbackQuery, state: FSMContext, ses
             return
         
         # Обновляем отчет с новой техникой
-        updated_report = await ReportService.create_or_update_report(
+        updated_report = await ReportService.add_equipment_to_report(
             session=session,
-            object_id=report.object_id,
-            report_type=report.report_type,
-            equipment_list=equipment_list,  # Передаем список ID
-            report_id=report_id
+            report_id=report_id,
+            equipment_data=[{"equipment_id": eq_id} for eq_id in equipment_list]
         )
+        
+        logging.info(f"Отправка техники для отчета #{report_id}. Список техники: {equipment_list}, Количество: {len(equipment_list)}")
         
         if not updated_report:
             logging.error(f"Не удалось обновить отчет {report_id}")
@@ -684,11 +599,24 @@ async def process_equipment_done(callback: CallbackQuery, state: FSMContext, ses
             )
             return
         
-        # Очищаем состояние
-        await state.clear()
+        # Формируем сообщение об успешном обновлении
+        equipment_info = [f"• {name}" for name in equipment_names]
         
-        # Показываем страницу редактирования отчета
-        await show_report_edit_page(callback, report_id, session)
+        if equipment_info:
+            names_text = "\n".join(equipment_info)
+            await callback.message.edit_text(
+                f"✅ Техника успешно обновлена в отчете:\n{names_text}\n\n {await format_report_info(report, callback.message.text)}\nВыберите действие:",
+                reply_markup=await get_report_actions_keyboard(report_id)
+            )
+        else:
+            await callback.message.edit_text(
+                "✅ Техника успешно обновлена в отчете.\n\n {await format_report_info(report, callback.message.text)}\nВыберите действие:",
+                reply_markup=await get_report_actions_keyboard(report_id)
+            )
+        
+        # Убираем состояние выбора техники, но сохраняем основные данные отчета
+        await state.set_state(ReportStates.edit_report)
+
         
     except Exception as e:
         logging.error(f"Ошибка при добавлении техники в отчет: {str(e)}", exc_info=True)
@@ -709,6 +637,17 @@ async def process_equipment_selection(callback: CallbackQuery, state: FSMContext
     # Получаем текущие данные состояния
     data = await state.get_data()
     equipment_list = data.get('equipment_list', [])
+    report_id = data.get('report_id')
+    
+    if not report_id:
+        await callback.answer("❌ Ошибка: не найден ID отчета", show_alert=True)
+        return
+    
+    # Получаем отчет с текущей техникой
+    report = await get_report_with_relations(session, report_id)
+    if not report:
+        await callback.answer("❌ Ошибка: отчет не найден", show_alert=True)
+        return
     
     # Проверяем, есть ли изменения
     was_selected = equipment_id in equipment_list
@@ -722,6 +661,9 @@ async def process_equipment_selection(callback: CallbackQuery, state: FSMContext
     # Обновляем данные состояния
     await state.update_data(equipment_list=equipment_list)
     
+    # Добавляем логирование для отслеживания списка техники
+    logging.info(f"Обновлен список техники: {equipment_list}")
+    
     # Получаем обновленный список техники
     all_equipment = await get_all_equipment(session)
     
@@ -731,9 +673,16 @@ async def process_equipment_selection(callback: CallbackQuery, state: FSMContext
     # Отправляем ответ на callback
     await callback.answer(f"{'Удалена' if was_selected else 'Добавлена'} техника")
     
+    # Добавляем информацию о том, сколько техники выбрано
+    selected_count = len(equipment_list)
+    message_text = f"Выберите технику для отчета:\n\n"
+    message_text += f"ℹ️ Выбрано единиц техники: {selected_count}\n\n"
+    message_text += "✅ - техника уже добавлена в отчет\n"
+    message_text += "Вы можете снять галочки, чтобы удалить технику из отчета, или отметить новую технику для добавления."
+    
     # Редактируем существующее сообщение
     await callback.message.edit_text(
-        "Выберите технику для отчета:",
+        message_text,
         reply_markup=keyboard
     )
     
@@ -980,52 +929,10 @@ async def process_comments(message: Message, state: FSMContext, session: AsyncSe
     # Сохраняем комментарии в состоянии
     await state.update_data(comments=message.text)
     
-    # Формируем информацию об отчете
-    report_info = (
-        f"📝 Редактирование отчета #{report.id}\n\n"
-        f"Тип: {report.type}\n"
-        f"Дата: {report.date.strftime('%d.%m.%Y %H:%M')}\n"
-        f"Статус: {report.status}\n"
-        f"Объект: {report.object.name}\n"
-    )
-    
-    # Добавляем тип работ, если есть
-    if report.type:
-        report_info += f"Тип работ: {report.type}\n"
-    
-    # Добавляем подтип работ, если есть
-    if report.work_subtype:
-        report_info += f"Подтип работ: {report.work_subtype}\n"
-    
-    # Добавляем ИТР, если есть
-    if report.itr_personnel:
-        itr_names = [itr.full_name for itr in report.itr_personnel]
-        if itr_names:
-            report_info += f"ИТР: {', '.join(itr_names)}\n"
-    
-    # Добавляем рабочих, если есть
-    if report.workers:
-        worker_names = [worker.full_name for worker in report.workers]
-        if worker_names:
-            report_info += f"Рабочие: {', '.join(worker_names)}\n"
-    
-    # Добавляем технику, если есть
-    if report.equipment:
-        equipment_names = [eq.name for eq in report.equipment]
-        if equipment_names:
-            report_info += f"Техника: {', '.join(equipment_names)}\n"
-
-    # Добавляем фотографии, если есть
-    if report.photos:
-        photo_count = len(report.photos)
-        report_info += f"Фотографий: {photo_count}\n"
-    
-    # Добавляем комментарии
-    report_info += f"Комментарий: {message.text}\n"
     
     # Показываем меню действий для редактирования
     await message.answer(
-        f"✅ Комментарии успешно сохранены!\n\n{report_info}\nВыберите действие:",
+        f"✅ Комментарии успешно сохранены!\n\n{await format_report_info(report, message.text)}\nВыберите действие:",
         reply_markup=await get_report_actions_keyboard(report_id)
     )
     
@@ -1063,6 +970,11 @@ async def process_save_report(callback: CallbackQuery, state: FSMContext, sessio
         await validate_report_data(data)
         logging.info("[process_save_report] Валидация успешно пройдена")
         
+        # Обновляем статус отчета на "sent" и время отправки
+        report_id = data.get('report_id')
+        data['status'] = "sent"
+        data['sent_at'] = datetime.utcnow()
+        
         # Создаем отчет
         logging.info("[process_save_report] Создаем отчет в БД")
         report = await create_report(session, data)
@@ -1073,16 +985,20 @@ async def process_save_report(callback: CallbackQuery, state: FSMContext, sessio
         result = await session.execute(object_query)
         object = result.scalar_one_or_none()
         
+        # Логируем действие отправки отчета
+        log_admin_action("report_sent", callback.from_user.id, f"Отправлен отчет #{report.id} по объекту '{object.name if object else 'Не указан'}'")
+        
         # Очищаем состояние
         await state.clear()
         
         # Отправляем сообщение об успешном создании отчета
         await callback.message.edit_text(
-            f"✅ Отчет успешно создан!\n\n"
+            f"✅ Отчет успешно создан и отправлен заказчику!\n\n"
             f"ID отчета: {report.id}\n"
             f"Объект: {object.name if object else 'Не указан'}\n"
             f"Тип работ: {report.report_type}\n"
-            f"Время: {report.type}",
+            f"Время: {report.type}\n"
+            f"Статус: отправлен",
             reply_markup=await get_admin_report_menu_keyboard()
         )
     except ValidationError as e:
@@ -1120,18 +1036,174 @@ async def validate_report_data(data: dict) -> None:
         if field not in data:
             error_msg = f"Отсутствует обязательное поле: {field}"
             logging.error(error_msg)
-            raise ValidationError(error_msg)
+            raise ValueError(error_msg)
         logging.info(f"Поле {field} найдено. Значение: {data[field]}")
     
     # Проверяем корректность значений
-    if data['report_type'] not in ['engineering', 'internal_networks', 'landscaping', 'general_construction']:
+    valid_report_types = ['Инженерные коммуникации', 'Внутриплощадочные сети', 'Благоустройство', 'Общестроительные работы']
+    if data['report_type'] not in valid_report_types:
         error_msg = "Некорректный тип отчета"
         logging.error(error_msg)
-        raise ValidationError(error_msg)
+        raise ValueError(error_msg)
     
     if data['type'] not in ['morning', 'evening']:
         error_msg = "Некорректное время суток"
         logging.error(error_msg)
-        raise ValidationError(error_msg)
+        raise ValueError(error_msg)
     
-    logging.info("Валидация данных отчета успешно завершена") 
+    logging.info("Валидация данных отчета успешно завершена")
+
+
+async def show_report_edit_page(message: Union[Message, CallbackQuery], report_id: int, session: AsyncSession) -> None:
+    """
+    Показывает страницу редактирования отчета
+    
+    Args:
+        message: Сообщение или callback query для редактирования
+        report_id: ID отчета
+        session: Сессия базы данных
+    """
+    try:
+        # Получаем отчет со всеми связями через get_report_with_relations
+        report = await get_report_with_relations(session, report_id)
+        if not report:
+            if isinstance(message, CallbackQuery):
+                await message.message.edit_text(
+                    "Отчет не найден",
+                    reply_markup=await get_admin_report_menu_keyboard()
+                )
+            else:
+                await message.answer(
+                    "Отчет не найден",
+                    reply_markup=await get_admin_report_menu_keyboard()
+                )
+            return
+        
+        # Получаем объект
+        object = report.object
+        
+        # Формируем информацию об отчете
+        report_info = (
+            f"📝 Редактирование отчета #{report.id}\n\n"
+            f"Тип: {report.type}\n"
+            f"Дата: {report.date.strftime('%d.%m.%Y %H:%M')}\n"
+            f"Статус: {report.status}\n"
+            f"Объект: {object.name if object else 'Не указан'}\n"
+        )
+        
+        # Добавляем тип работ, если есть
+        if report.report_type:
+            report_info += f"Тип работ: {report.report_type}\n"
+        
+        # Добавляем подтип работ, если есть
+        if report.work_subtype:
+            report_info += f"Подтип работ: {report.work_subtype}\n"
+        
+        # Добавляем ИТР, если есть
+        if report.itr_personnel:
+            itr_names = [itr.full_name for itr in report.itr_personnel]
+            if itr_names:
+                report_info += f"ИТР: {', '.join(itr_names)}\n"
+        
+        # Добавляем рабочих, если есть
+        if report.workers:
+            worker_names = [worker.full_name for worker in report.workers]
+            if worker_names:
+                report_info += f"Рабочие: {', '.join(worker_names)}\n"
+        
+        # Добавляем технику, если есть
+        if report.equipment:
+            equipment_names = [eq.name for eq in report.equipment]
+            if equipment_names:
+                report_info += f"Техника: {', '.join(equipment_names)}\n"
+        
+        # Добавляем фотографии, если есть
+        if report.photos:
+            photo_count = len(report.photos)
+            report_info += f"Фотографий: {photo_count}\n"
+        
+        # Добавляем комментарии, если есть
+        if report.comments:
+            report_info += f"Комментарий: {report.comments}\n"
+        
+        # Отправляем сообщение с информацией об отчете
+        if isinstance(message, CallbackQuery):
+            await message.message.edit_text(
+                f"{report_info}\nВыберите действие:",
+                reply_markup=await get_report_actions_keyboard(report_id)
+            )
+        else:
+            await message.answer(
+                f"{report_info}\nВыберите действие:",
+                reply_markup=await get_report_actions_keyboard(report_id)
+            )
+    except Exception as e:
+        logging.error(f"Ошибка при отображении страницы редактирования отчета: {str(e)}", exc_info=True)
+        if isinstance(message, CallbackQuery):
+            await message.message.edit_text(
+                "Произошла ошибка при отображении страницы редактирования.",
+                reply_markup=await get_admin_report_menu_keyboard()
+            )
+        else:
+            await message.answer(
+                "Произошла ошибка при отображении страницы редактирования.",
+                reply_markup=await get_admin_report_menu_keyboard()
+            )
+
+
+async def format_report_info(report: Report, message: str) -> str:
+    """Форматирование информации об отчете"""
+    # Формируем информацию об отчете
+
+    if report.status == "sent":
+        report_info = (
+            f"✅ Отчет #{report.id} отправлен заказчику\n\n"
+            f"Тип: {report.type}\n"
+            f"Дата: {report.date.strftime('%d.%m.%Y %H:%M')}\n"
+            f"Статус: {report.status}\n"
+            f"Объект: {report.object.name}\n"
+        )
+    else:
+        report_info = (
+            f"📝 Редактирование отчета #{report.id}\n\n"
+            f"Тип: {report.type}\n"
+            f"Дата: {report.date.strftime('%d.%m.%Y %H:%M')}\n"
+            f"Статус: {report.status}\n"
+            f"Объект: {report.object.name}\n"
+    )
+    
+    # Добавляем тип работ, если есть
+    if report.type:
+        report_info += f"Тип работ: {report.type}\n"
+    
+    # Добавляем подтип работ, если есть
+    if report.work_subtype:
+        report_info += f"Подтип работ: {report.work_subtype}\n"
+    
+    # Добавляем ИТР, если есть
+    if report.itr_personnel:
+        itr_names = [itr.full_name for itr in report.itr_personnel]
+        if itr_names:
+            report_info += f"ИТР: {', '.join(itr_names)}\n"
+    
+    # Добавляем рабочих, если есть
+    if report.workers:
+        worker_names = [worker.full_name for worker in report.workers]
+        if worker_names:
+            report_info += f"Рабочие: {', '.join(worker_names)}\n"
+    
+    # Добавляем технику, если есть
+    if report.equipment:
+        equipment_names = [eq.name for eq in report.equipment]
+        if equipment_names:
+            report_info += f"Техника: {', '.join(equipment_names)}\n"
+
+    # Добавляем фотографии, если есть
+    if report.photos:
+        photo_count = len(report.photos)
+        report_info += f"Фотографий: {photo_count}\n"
+    
+    # Добавляем комментарии
+    report_info += f"Комментарий: {message}\n"
+
+    return report_info

@@ -1,14 +1,14 @@
+import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import update, delete
+from sqlalchemy import update, delete, text, func
 from sqlalchemy.orm import joinedload, selectinload
 from typing import List, Optional, Union, Dict, Any
 from datetime import datetime
-import logging
 
 from construction_report_bot.database.models import (
-    User, Client, Object, ITR, Worker, Equipment, Report, ReportPhoto,
-    report_equipment
+    User, Client, Object, ITR, Worker, Equipment, 
+    Report, ReportPhoto, report_equipment, report_itr, report_workers
 )
 from construction_report_bot.utils.exceptions import DatabaseError
 
@@ -66,7 +66,14 @@ async def get_client_by_id(session: AsyncSession, client_id: int) -> Optional[Cl
 
 async def get_client_by_user_id(session: AsyncSession, user_id: int) -> Optional[Client]:
     """Получение клиента по ID пользователя"""
-    result = await session.execute(select(Client).where(Client.user_id == user_id))
+    result = await session.execute(
+        select(Client)
+        .where(Client.user_id == user_id)
+        .options(
+            joinedload(Client.objects),
+            joinedload(Client.user)
+        )
+    )
     return result.scalars().first()
 
 async def create_client(session: AsyncSession, client_data: Dict[str, Any]) -> Client:
@@ -85,11 +92,72 @@ async def update_client(session: AsyncSession, client_id: int, client_data: Dict
     return True
 
 async def delete_client(session: AsyncSession, client_id: int) -> bool:
-    """Удаление клиента"""
-    stmt = delete(Client).where(Client.id == client_id)
-    await session.execute(stmt)
-    await session.commit()
-    return True
+    """Удаление клиента со всеми связанными данными"""
+    try:
+        # 1. Получаем клиента со связанными объектами
+        client = await get_client_by_id(session, client_id)
+        if not client:
+            logging.error(f"Клиент с ID {client_id} не найден")
+            return False
+        
+        user_id = client.user_id
+        logging.info(f"Начало удаления клиента {client.full_name} (ID: {client_id})")
+        
+        # 2. Получаем список объектов клиента
+        result = await session.execute(
+            text("SELECT object_id FROM client_objects WHERE client_id = :client_id"),
+            {"client_id": client_id}
+        )
+        object_ids = [row[0] for row in result.fetchall()]
+        logging.info(f"Найдено {len(object_ids)} объектов, связанных с клиентом")
+        
+        # 3. Для каждого объекта находим и удаляем связанные отчеты
+        for object_id in object_ids:
+            # Находим отчеты для объекта
+            reports_result = await session.execute(
+                select(Report).where(Report.object_id == object_id)
+            )
+            reports = reports_result.scalars().all()
+            logging.info(f"Найдено {len(reports)} отчетов для объекта {object_id}")
+            
+            # Удаляем каждый отчет и его связи
+            for report in reports:
+                # Сначала удаляем связи отчета
+                await delete_report_relations(session, report.id)
+                
+                # Затем удаляем сам отчет
+                await session.execute(
+                    delete(Report).where(Report.id == report.id)
+                )
+                logging.info(f"Удален отчет {report.id}")
+        
+        # 4. Удаляем связи клиента с объектами
+        await session.execute(
+            text("DELETE FROM client_objects WHERE client_id = :client_id"),
+            {"client_id": client_id}
+        )
+        logging.info(f"Удалены связи клиента с объектами")
+        
+        # 5. Удаляем самого клиента
+        stmt = delete(Client).where(Client.id == client_id)
+        await session.execute(stmt)
+        logging.info(f"Удален клиент {client_id}")
+        
+        # 6. Удаляем связанного пользователя
+        if user_id:
+            user_stmt = delete(User).where(User.id == user_id)
+            await session.execute(user_stmt)
+            logging.info(f"Удален пользователь {user_id}, связанный с клиентом")
+        
+        # 7. Фиксируем транзакцию
+        await session.commit()
+        logging.info(f"Успешно удален клиент {client_id} со всеми связями")
+        return True
+    except Exception as e:
+        # Откатываем транзакцию в случае ошибки
+        await session.rollback()
+        logging.error(f"Ошибка при удалении клиента #{client_id}: {str(e)}")
+        raise
 
 # Операции с объектами
 async def get_all_objects(session: AsyncSession) -> List[Object]:
@@ -118,11 +186,55 @@ async def update_object(session: AsyncSession, object_id: int, object_data: Dict
     return True
 
 async def delete_object(session: AsyncSession, object_id: int) -> bool:
-    """Удаление объекта"""
-    stmt = delete(Object).where(Object.id == object_id)
-    await session.execute(stmt)
-    await session.commit()
-    return True
+    """Удаление объекта со всеми связанными данными"""
+    try:
+        # 1. Получаем объект
+        object_info = await get_object_by_id(session, object_id)
+        if not object_info:
+            logging.error(f"Объект с ID {object_id} не найден")
+            return False
+        
+        logging.info(f"Начало удаления объекта {object_info.name} (ID: {object_id})")
+        
+        # 2. Получаем все отчеты объекта
+        reports_result = await session.execute(
+            select(Report).where(Report.object_id == object_id)
+        )
+        reports = reports_result.scalars().all()
+        logging.info(f"Найдено {len(reports)} отчетов для объекта {object_id}")
+        
+        # 3. Удаляем каждый отчет и его связи
+        for report in reports:
+            # Сначала удаляем связи отчета
+            await delete_report_relations(session, report.id)
+            
+            # Затем удаляем сам отчет
+            await session.execute(
+                delete(Report).where(Report.id == report.id)
+            )
+            logging.info(f"Удален отчет {report.id}")
+        
+        # 4. Удаляем связи объекта с клиентами
+        await session.execute(
+            text("DELETE FROM client_objects WHERE object_id = :object_id"),
+            {"object_id": object_id}
+        )
+        logging.info(f"Удалены связи объекта с клиентами")
+        
+        # 5. Удаляем сам объект
+        stmt = delete(Object).where(Object.id == object_id)
+        await session.execute(stmt)
+        logging.info(f"Удален объект {object_id}")
+        
+        # 6. Фиксируем транзакцию
+        await session.commit()
+        logging.info(f"Успешно удален объект {object_id} со всеми связями")
+        return True
+    except Exception as e:
+        # Откатываем транзакцию в случае ошибки
+        await session.rollback()
+        logging.error(f"Ошибка при удалении объекта #{object_id}: {str(e)}")
+        raise
 
 # Операции с ИТР
 async def get_all_itr(session: AsyncSession) -> List[ITR]:
@@ -229,26 +341,45 @@ async def get_report_by_id(session: AsyncSession, report_id: int) -> Optional[Re
     result = await session.execute(select(Report).where(Report.id == report_id))
     return result.scalars().first()
 
-async def get_reports_by_object(session: AsyncSession, object_id: int, user_id: int) -> List[Report]:
+async def get_reports_by_object(session: AsyncSession, object_id: int, user_id: Optional[int] = None) -> List[Report]:
     """Получение отчетов по объекту"""
     query = select(Report).where(
-        Report.object_id == object_id,
-        Report.user_id == user_id
+        Report.object_id == object_id
     ).order_by(Report.date.desc())
     
+    # Включаем связанные данные
+    query = query.options(
+        joinedload(Report.object),
+        joinedload(Report.itr_personnel),
+        joinedload(Report.workers),
+        joinedload(Report.equipment)
+    )
+    
     result = await session.execute(query)
-    return result.scalars().all()
+    return result.unique().scalars().all()
 
 async def get_today_reports(session: AsyncSession, object_id: Optional[int] = None) -> List[Report]:
     """Получение отчетов за сегодня, возможно с фильтром по объекту"""
-    today = datetime.utcnow().date()
-    query = select(Report).where(Report.date >= today)
+    # Получаем начало и конец сегодняшнего дня
+    today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    end_of_day = today.replace(hour=23, minute=59, second=59, microsecond=999999)
+    
+    # Строим запрос с фильтрацией по текущей дате
+    query = select(Report).where(Report.date.between(today, end_of_day))
     
     if object_id:
         query = query.where(Report.object_id == object_id)
     
+    # Включаем связанные данные
+    query = query.options(
+        joinedload(Report.object),
+        joinedload(Report.itr_personnel),
+        joinedload(Report.workers),
+        joinedload(Report.equipment)
+    )
+    
     result = await session.execute(query)
-    return result.scalars().all()
+    return result.unique().scalars().all()
 
 async def create_report(session: AsyncSession, data: dict) -> Report:
     """Создание или обновление отчета"""
@@ -351,11 +482,64 @@ async def update_report(session: AsyncSession, report_id: int, report_data: Dict
     return True
 
 async def delete_report(session: AsyncSession, report_id: int) -> bool:
-    """Удаление отчета"""
-    stmt = delete(Report).where(Report.id == report_id)
-    await session.execute(stmt)
-    await session.commit()
-    return True
+    """Удаление отчета со всеми связями"""
+    try:
+        # 1. Получаем отчет для логирования
+        report = await get_report_by_id(session, report_id)
+        if not report:
+            logging.error(f"Отчет с ID {report_id} не найден")
+            return False
+            
+        logging.info(f"Начало удаления отчета {report_id}")
+        
+        # 2. Удаляем все связи отчета
+        await delete_report_relations(session, report_id)
+        logging.info(f"Удалены все связи отчета {report_id}")
+        
+        # 3. Удаляем сам отчет
+        stmt = delete(Report).where(Report.id == report_id)
+        await session.execute(stmt)
+        logging.info(f"Удален отчет {report_id}")
+        
+        # 4. Фиксируем транзакцию
+        await session.commit()
+        logging.info(f"Успешно удален отчет {report_id} со всеми связями")
+        return True
+    except Exception as e:
+        # Откатываем транзакцию в случае ошибки
+        await session.rollback()
+        logging.error(f"Ошибка при удалении отчета #{report_id}: {str(e)}")
+        raise
+
+async def delete_report_relations(session: AsyncSession, report_id: int) -> bool:
+    """Удаление всех связей отчета с другими таблицами"""
+    try:
+        # Удаляем связи с техникой
+        await session.execute(
+            delete(report_equipment).where(report_equipment.c.report_id == report_id)
+        )
+        
+        # Удаляем связи с ИТР
+        await session.execute(
+            delete(report_itr).where(report_itr.c.report_id == report_id)
+        )
+        
+        # Удаляем связи с рабочими
+        await session.execute(
+            delete(report_workers).where(report_workers.c.report_id == report_id)
+        )
+        
+        # Удаляем фотографии отчета
+        await session.execute(
+            delete(ReportPhoto).where(ReportPhoto.report_id == report_id)
+        )
+        
+        await session.commit()
+        return True
+    except Exception as e:
+        await session.rollback()
+        logger.error(f"Ошибка при удалении связей отчета #{report_id}: {str(e)}")
+        raise
 
 # Операции с фотографиями отчетов
 async def add_report_photo(session: AsyncSession, report_id: int, file_path: str, description: Optional[str] = None) -> ReportPhoto:
@@ -384,16 +568,20 @@ async def get_all_reports(session: AsyncSession, user_id: Optional[int] = None) 
 
 async def get_reports_by_date(session: AsyncSession, date: datetime) -> List[Report]:
     """Получение отчетов по дате"""
-    # Получаем начало и конец дня
-    start_date = date.replace(hour=0, minute=0, second=0, microsecond=0)
-    end_date = date.replace(hour=23, minute=59, second=59, microsecond=999999)
-    
-    query = select(Report).where(
-        Report.date.between(start_date, end_date)
-    ).order_by(Report.date.desc())
+    query = (
+        select(Report)
+        .options(
+            joinedload(Report.object),
+            joinedload(Report.itr_personnel),
+            joinedload(Report.workers),
+            joinedload(Report.equipment)
+        )
+        .where(func.date(Report.date) == func.date(date))
+        .order_by(Report.date.desc())
+    )
     
     result = await session.execute(query)
-    return result.scalars().all()
+    return list(result.scalars().unique())
 
 async def get_reports_by_status(session: AsyncSession, status: str) -> List[Report]:
     """Получение отчетов по статусу"""
@@ -402,15 +590,22 @@ async def get_reports_by_status(session: AsyncSession, status: str) -> List[Repo
     )
     return result.scalars().all()
 
-async def get_reports_by_type(session: AsyncSession, report_type: str, user_id: int) -> List[Report]:
+async def get_reports_by_type(session: AsyncSession, report_type: str, user_id: Optional[int] = None) -> List[Report]:
     """Получение отчетов по типу (Утро/Вечер)"""
     query = select(Report).where(
-        Report.type == report_type,
-        Report.user_id == user_id
+        Report.type == report_type
     ).order_by(Report.date.desc())
     
+    # Включаем связанные данные
+    query = query.options(
+        joinedload(Report.object),
+        joinedload(Report.itr_personnel),
+        joinedload(Report.workers),
+        joinedload(Report.equipment)
+    )
+    
     result = await session.execute(query)
-    return result.scalars().all()
+    return result.unique().scalars().all()
 
 async def get_reports_by_work_type(session: AsyncSession, report_type: str, work_subtype: Optional[str] = None) -> List[Report]:
     """Получение отчетов по типу работ и подтипу"""
@@ -518,14 +713,21 @@ async def get_reports_by_date_range(session: AsyncSession, start_date: datetime,
         logger.error(f"Ошибка при получении отчетов за период {start_date} - {end_date}: {str(e)}")
         return []
 
-async def get_reports_by_itr(session: AsyncSession, itr_id: int, user_id: int) -> List[Report]:
+async def get_reports_by_itr(session: AsyncSession, itr_id: int, user_id: Optional[int] = None) -> List[Report]:
     """Получение отчетов по ИТР"""
     query = select(Report).join(
         Report.itr_personnel
     ).where(
-        Report.itr_personnel.any(id=itr_id),
-        Report.user_id == user_id
+        Report.itr_personnel.any(id=itr_id)
     ).order_by(Report.date.desc())
     
+    # Включаем связанные данные
+    query = query.options(
+        joinedload(Report.object),
+        joinedload(Report.itr_personnel),
+        joinedload(Report.workers),
+        joinedload(Report.equipment)
+    )
+    
     result = await session.execute(query)
-    return result.scalars().all() 
+    return result.unique().scalars().all() 

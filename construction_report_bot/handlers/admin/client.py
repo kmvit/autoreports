@@ -291,7 +291,7 @@ async def process_client_delete(callback: CallbackQuery):
     
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"confirm_delete_client_{client_id}"),
+        InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"client_delete_confirm_{client_id}"),
         InlineKeyboardButton(text="❌ Нет, отменить", callback_data=f"edit_client_{client_id}")
     )
     
@@ -305,7 +305,7 @@ async def process_client_delete(callback: CallbackQuery):
         logging.error(f"Ошибка при редактировании сообщения: {e}")
         await callback.answer("Произошла ошибка. Попробуйте позже.")
 
-@admin_client_router.callback_query(F.data.startswith("confirm_delete_client_"))
+@admin_client_router.callback_query(F.data.startswith("client_delete_confirm_"))
 @error_handler
 @with_session
 async def process_confirm_delete_client(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
@@ -320,12 +320,30 @@ async def process_confirm_delete_client(callback: CallbackQuery, state: FSMConte
         )
         return
     
-    await delete_client(session, client_id)
+    full_name = client.full_name  # Сохраняем имя заранее для использования после удаления
     
-    await callback.message.edit_text(
-        f"✅ Клиент {client.full_name} успешно удален",
-        reply_markup=await get_admin_keyboard()
-    )
+    try:
+        await delete_client(session, client_id)
+        
+        logging.info(f"Клиент {full_name} (ID: {client_id}) успешно удален")
+        
+        await callback.message.edit_text(
+            f"✅ Клиент {full_name} успешно удален",
+            reply_markup=await get_admin_keyboard()
+        )
+    except Exception as e:
+        # Развернутое логирование ошибки для диагностики
+        logging.error(f"Ошибка при удалении клиента {full_name} (ID: {client_id}): {str(e)}")
+        
+        # Упрощенное сообщение для пользователя
+        error_message = "Произошла ошибка при удалении клиента."
+        if "ForeignKeyViolationError" in str(e):
+            error_message = "Не удалось удалить клиента из-за связанных данных. Свяжитесь с администратором."
+        
+        await callback.message.edit_text(
+            f"❌ {error_message}",
+            reply_markup=await get_admin_keyboard()
+        )
 
 # Обработчики редактирования полей заказчика
 @admin_client_router.callback_query(F.data.startswith("edit_client_name_"))
@@ -606,7 +624,7 @@ async def process_client_delete_menu(callback: CallbackQuery, session: AsyncSess
         builder.row(
             InlineKeyboardButton(
                 text=f"🗑️ {client.full_name}",
-                callback_data=f"confirm_delete_client_{client.id}"
+                callback_data=f"client_delete_confirm_{client.id}"
             )
         )
     builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="client_back"))

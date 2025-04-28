@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Text, Boolean, Table
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Text, Boolean, Table, BigInteger
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -43,7 +43,7 @@ class User(Base):
     __tablename__ = 'users'
     
     id = Column(Integer, primary_key=True)
-    telegram_id = Column(Integer, unique=True, nullable=True)
+    telegram_id = Column(BigInteger, unique=True, nullable=True)
     username = Column(String(100), nullable=True)
     role = Column(String(50), nullable=False)  # admin, client
     access_code = Column(String(100), nullable=True)  # Код для первого входа
