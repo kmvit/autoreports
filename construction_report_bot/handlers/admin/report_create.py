@@ -48,7 +48,7 @@ admin_report_create_router.callback_query.middleware(admin_required())
 WORK_TYPE_NAMES = {
     "report_engineering": "Инженерные коммуникации",
     "report_internal_networks": "Внутриплощадочные сети",
-    "work_landscaping": "Благоустройство",
+    "report_landscaping": "Благоустройство",
     "report_general_construction": "Общестроительные работы"
 }
 
@@ -219,7 +219,7 @@ async def process_report_type_selection(callback: CallbackQuery, state: FSMConte
     await validate_report_data({
         'object_id': data['object_id'],
         'report_type': work_type_name,
-        'type': report_type,
+        'type': report_type.replace('_report', ''),  # Убираем суффикс _report
         'itr_list': [],
         'workers_list': [],
         'equipment_list': []
@@ -228,7 +228,8 @@ async def process_report_type_selection(callback: CallbackQuery, state: FSMConte
     # Создаем базовый отчет
     report = await create_base_report(session, {
         'object_id': data['object_id'],
-        'report_type': work_type_name,
+        'type': report_type.replace('_report', ''),  # morning или evening
+        'report_type': work_type_name,  # тип работ
         'work_type': work_type_name,
         'work_subtype': work_subtype_name
     })
@@ -238,8 +239,8 @@ async def process_report_type_selection(callback: CallbackQuery, state: FSMConte
     state_data = {
         'report_id': report.id,
         'object_id': data['object_id'],
-        'report_type': report_type,
-        'type': report_type,
+        'report_type': work_type_name,  # Используем русское название типа отчета
+        'type': report_type.replace('_report', ''),  # Убираем суффикс _report
         'work_type': work_type_name,
         'work_subtype': work_subtype_name,
         'comments': data.get('comments', ''),

@@ -5,12 +5,14 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, FSInputFile
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 from construction_report_bot.database.crud import (
     get_report_by_id,
     get_report_with_relations,
-    get_all_reports
+    get_all_reports,
+    get_object_by_id,
+    get_reports_by_object_date_type
 )
 from construction_report_bot.database.models import Report, ReportPhoto
 from construction_report_bot.config.settings import settings
@@ -175,44 +177,120 @@ async def process_export_excel(callback: CallbackQuery, state: FSMContext, sessi
 @with_session
 async def process_export_pdf(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработка экспорта отчета в PDF"""
-    # Получаем ID отчета из callback_data
-    report_id = int(callback.data.split("_")[2])
-    logging.info(f"Попытка экспорта отчета #{report_id} в PDF")
-    
     try:
-        # Получаем отчет из БД
-        report = await get_report_with_relations(session, report_id)
-        if not report:
-            logging.warning(f"[process_export_pdf] Отчет #{report_id} не найден в базе данных")
+        # Проверяем формат callback_data
+        parts = callback.data.split("_")
+        logging.info(f"Получены части callback_data: {parts}")
+        
+        # Если формат export_pdf_objectId_dateStr_reportType
+        if len(parts) >= 5:
+            # Получаем ID объекта, дату и тип отчета из callback_data
+            object_id = int(parts[2])
+            date_str = parts[3]
+            report_type = parts[4]
+            
+            logging.info(f"Попытка экспорта отчетов для объекта #{object_id}, дата: {date_str}, тип: {report_type}")
+            
+            # Преобразуем строку даты в объект datetime
+            try:
+                date = datetime.strptime(date_str, '%Y%m%d')
+                logging.info(f"Дата преобразована успешно: {date}")
+            except ValueError as e:
+                logging.error(f"Ошибка при преобразовании даты: {str(e)}")
+                await callback.message.edit_text(
+                    "Ошибка в формате даты.",
+                    reply_markup=await get_admin_report_menu_keyboard()
+                )
+                return
+            
+            # Получаем информацию об объекте
+            object_info = await get_object_by_id(session, object_id)
+            if not object_info:
+                logging.warning(f"[process_export_pdf] Объект #{object_id} не найден")
+                await callback.message.edit_text(
+                    "Объект не найден.",
+                    reply_markup=await get_admin_report_menu_keyboard()
+                )
+                return
+            
+            # Получаем все отчеты для объекта за указанную дату и тип
+            reports = await get_reports_by_object_date_type(session, object_id, date, report_type)
+            logging.info(f"Найдено отчетов: {len(reports) if reports else 0}")
+            
+            if not reports:
+                logging.warning(f"[process_export_pdf] Отчеты для объекта #{object_id} за {date.strftime('%d.%m.%Y')} типа {report_type} не найдены")
+                await callback.message.edit_text(
+                    f"Отчеты для объекта '{object_info.name}' за {date.strftime('%d.%m.%Y')} не найдены.",
+                    reply_markup=await get_admin_report_menu_keyboard()
+                )
+                return
+            
+            # Определяем название типа отчета
+            type_name = "Утренний" if report_type == "morning_report" else "Вечерний"
+            
+            # Создаем директорию для экспорта, если её нет
+            export_dir = os.path.join(settings.BASE_DIR, settings.EXPORT_DIR)
+            os.makedirs(export_dir, exist_ok=True)
+            
+            # Формируем имя файла
+            filename = f"{object_info.name}_{date.strftime('%Y%m%d')}_{report_type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            filepath = os.path.join(export_dir, filename)
+            
+            # Экспортируем отчеты в PDF
+            export_report_to_pdf(reports, filepath)
+            
+            # Отправляем файл отчета
+            document = FSInputFile(filepath)
+            await callback.message.answer_document(
+                document=document,
+                caption=f"📄 {type_name} отчеты для объекта '{object_info.name}' за {date.strftime('%d.%m.%Y')} успешно экспортированы в PDF"
+            )
+            
+            # Возвращаемся в меню администратора
             await callback.message.edit_text(
-                "Отчет не найден.",
+                "Выберите действие:",
                 reply_markup=await get_admin_report_menu_keyboard()
             )
-            return
-        
-        # Создаем директорию для экспорта, если её нет
-        export_dir = os.path.join(settings.BASE_DIR, settings.EXPORT_DIR)
-        os.makedirs(export_dir, exist_ok=True)
-        
-        # Формируем имя файла
-        filename = f"report_{report_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-        filepath = os.path.join(export_dir, filename)
-        
-        # Экспортируем отчет в PDF
-        export_report_to_pdf([report], filepath)
-        
-        # Отправляем файл отчета
-        document = FSInputFile(filepath)
-        await callback.message.answer_document(
-            document=document,
-            caption=f"📄 Отчет #{report_id} успешно экспортирован в PDF"
-        )
-        
-        # Возвращаемся в меню администратора
-        await callback.message.edit_text(
-            "Выберите действие:",
-            reply_markup=await get_admin_report_menu_keyboard()
-        )
+            
+        # Если формат export_pdf_reportId (старый формат)
+        else:
+            # Получаем ID отчета из callback_data
+            report_id = int(callback.data.split("_")[2])
+            logging.info(f"Попытка экспорта отчета #{report_id} в PDF")
+            
+            # Получаем отчет из БД
+            report = await get_report_with_relations(session, report_id)
+            if not report:
+                logging.warning(f"[process_export_pdf] Отчет #{report_id} не найден в базе данных")
+                await callback.message.edit_text(
+                    "Отчет не найден.",
+                    reply_markup=await get_admin_report_menu_keyboard()
+                )
+                return
+            
+            # Создаем директорию для экспорта, если её нет
+            export_dir = os.path.join(settings.BASE_DIR, settings.EXPORT_DIR)
+            os.makedirs(export_dir, exist_ok=True)
+            
+            # Формируем имя файла
+            filename = f"report_{report_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            filepath = os.path.join(export_dir, filename)
+            
+            # Экспортируем отчет в PDF
+            export_report_to_pdf([report], filepath)
+            
+            # Отправляем файл отчета
+            document = FSInputFile(filepath)
+            await callback.message.answer_document(
+                document=document,
+                caption=f"📄 Отчет #{report_id} успешно экспортирован в PDF"
+            )
+            
+            # Возвращаемся в меню администратора
+            await callback.message.edit_text(
+                "Выберите действие:",
+                reply_markup=await get_admin_report_menu_keyboard()
+            )
         
     except Exception as e:
         logging.error(f"Ошибка при экспорте отчета в PDF: {str(e)}", exc_info=True)

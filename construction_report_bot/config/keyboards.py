@@ -3,7 +3,7 @@ from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Any
 
-from construction_report_bot.database.models import ITR, Worker, Equipment
+from construction_report_bot.database.models import ITR, Worker, Equipment, Report
 
 # Общие клавиатуры
 def get_main_menu_keyboard() -> ReplyKeyboardMarkup:
@@ -87,22 +87,20 @@ def get_report_type_keyboard() -> InlineKeyboardMarkup:
 # Клавиатуры для заказчика
 def get_report_filter_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура для фильтрации отчетов"""
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        InlineKeyboardButton(text="📅 По дате", callback_data="filter_date"),
-        InlineKeyboardButton(text="🏗️ По объекту", callback_data="filter_object")
-    )
-    builder.row(
-        InlineKeyboardButton(text="🌅/🌆 По типу отчета", callback_data="filter_report_type"),
-        InlineKeyboardButton(text="🔍 Сбросить фильтры", callback_data="filter_reset")
-    )
-    return builder.as_markup()
+    keyboard = [
+        [InlineKeyboardButton(text="📅 По дате", callback_data="filter_date")],
+        [InlineKeyboardButton(text="🏗 По объекту", callback_data="filter_object")],
+        [InlineKeyboardButton(text="📝 По типу отчета", callback_data="filter_report_type")],
+        [InlineKeyboardButton(text="🔄 Сбросить фильтры", callback_data="filter_reset")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-def get_back_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура с кнопкой назад"""
-    builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="back"))
-    return builder.as_markup()
+def get_back_keyboard(callback_data: str = "back_to_main") -> InlineKeyboardMarkup:
+    """Создает клавиатуру с кнопкой 'Назад'"""
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🔙 Назад", callback_data=callback_data)
+    ]])
 
 def get_object_back_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура с кнопкой назад для объектов"""
@@ -270,4 +268,58 @@ def get_work_type_keyboard() -> InlineKeyboardMarkup:
     builder.row(InlineKeyboardButton(text="Благоустройство", callback_data="work_landscaping"))
     builder.row(InlineKeyboardButton(text="Общестроительные работы", callback_data="work_general_construction"))
     builder.row(InlineKeyboardButton(text="Назад", callback_data="back_to_object"))
-    return builder.as_markup() 
+    return builder.as_markup()
+
+def create_report_type_keyboard(reports: List[Report], object_id: int, date_str: str) -> InlineKeyboardMarkup:
+    """Создает клавиатуру с типами отчетов (утренний/вечерний)"""
+    keyboard = []
+    
+    morning_reports = [r for r in reports if r.type == "morning"]
+    evening_reports = [r for r in reports if r.type == "evening"]
+    
+    if morning_reports:
+        keyboard.append([InlineKeyboardButton(
+            text=f"🌅 Утренний ({len(morning_reports)} отчетов)",
+            callback_data=f"client_date_object_type_reports_{date_str}_{object_id}_morning"
+        )])
+    
+    if evening_reports:
+        keyboard.append([InlineKeyboardButton(
+            text=f"🌆 Вечерний ({len(evening_reports)} отчетов)",
+            callback_data=f"client_date_object_type_reports_{date_str}_{object_id}_evening"
+        )])
+    
+    keyboard.append([InlineKeyboardButton(
+        text="🔙 Назад к выбору даты",
+        callback_data=f"client_date_object_reports_{date_str}_{object_id}"
+    )])
+    
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+def create_object_keyboard(objects: List[dict], back_callback: str = "back_to_main") -> InlineKeyboardMarkup:
+    """Создает клавиатуру со списком объектов"""
+    keyboard = []
+    for obj in objects:
+        keyboard.append([InlineKeyboardButton(
+            text=f"🏗️ {obj['name']}",
+            callback_data=f"select_object_{obj['id']}"
+        )])
+    keyboard.append([InlineKeyboardButton(
+        text="🔙 Назад",
+        callback_data=back_callback
+    )])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+def create_reports_list_keyboard(reports: List[Report], back_callback: str = "back_to_filters") -> InlineKeyboardMarkup:
+    """Создает клавиатуру со списком отчетов"""
+    keyboard = []
+    for i, report in enumerate(reports, start=1):
+        keyboard.append([InlineKeyboardButton(
+            text=f"{i}. {report.date.strftime('%d.%m.%Y')} - {report.object.name}",
+            callback_data=f"view_report_{report.id}"
+        )])
+    keyboard.append([InlineKeyboardButton(
+        text="🔙 Назад",
+        callback_data=back_callback
+    )])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard) 

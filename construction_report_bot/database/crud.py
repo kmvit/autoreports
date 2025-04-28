@@ -625,8 +625,8 @@ async def create_base_report(session: AsyncSession, data: dict) -> Report:
         report = Report(
             object_id=data['object_id'],
             date=datetime.now(),
-            type=data['report_type'],  # тип отчета (утренний/вечерний)
-            report_type=data.get('work_type', 'general_construction'),  # тип работ
+            type=data.get('type', 'morning'),  # тип отчета (утренний/вечерний)
+            report_type=data.get('report_type', 'Общестроительные работы'),  # тип работ
             status='draft'  # Статус черновика
         )
         
@@ -730,4 +730,57 @@ async def get_reports_by_itr(session: AsyncSession, itr_id: int, user_id: Option
     )
     
     result = await session.execute(query)
-    return result.unique().scalars().all() 
+    return result.unique().scalars().all()
+
+async def get_reports_grouped_by_objects(session: AsyncSession, user_id: Optional[int] = None) -> Dict[int, List[Report]]:
+    """Получение отчетов, сгруппированных по объектам"""
+    # Получаем все отчеты
+    reports = await get_all_reports(session, user_id)
+    
+    # Группируем отчеты по объектам
+    grouped_reports = {}
+    for report in reports:
+        object_id = report.object_id
+        if object_id not in grouped_reports:
+            grouped_reports[object_id] = []
+        grouped_reports[object_id].append(report)
+    
+    return grouped_reports
+
+async def get_reports_by_object_date_type(session: AsyncSession, object_id: int, date: datetime, report_type: str) -> List[Report]:
+    """Получить отчеты по объекту, дате и типу (утренний/вечерний)"""
+    try:
+        logging.info(f"Попытка получить отчеты для объекта #{object_id} за {date.strftime('%d.%m.%Y')} типа {report_type}")
+        
+        # Создаем запрос с загрузкой всех связанных данных
+        query = (
+            select(Report)
+            .options(
+                selectinload(Report.object),
+                selectinload(Report.itr_personnel),
+                selectinload(Report.workers),
+                selectinload(Report.equipment),
+                selectinload(Report.photos)
+            )
+            .where(
+                Report.object_id == object_id,
+                func.date(Report.date) == date.date(),
+                Report.type == report_type
+            )
+            .order_by(Report.date)
+        )
+        
+        # Выполняем запрос
+        result = await session.execute(query)
+        reports = result.scalars().all()
+        
+        logging.info(f"Найдено {len(reports)} отчетов для объекта #{object_id} за {date.strftime('%d.%m.%Y')} типа {report_type}")
+        
+        # Логируем детали каждого найденного отчета
+        for report in reports:
+            logging.info(f"Найден отчет #{report.id}: дата={report.date}, тип={report.type}, статус={report.status}")
+        
+        return reports
+    except Exception as e:
+        logging.error(f"Ошибка при получении отчетов: {str(e)}", exc_info=True)
+        return [] 

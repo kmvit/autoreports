@@ -8,6 +8,8 @@ from construction_report_bot.handlers.common import AuthStates  # Добавля
 from aiogram.fsm.context import FSMContext  # Добавляем импорт контекста FSM
 import logging
 
+logger = logging.getLogger(__name__)
+
 class AuthMiddleware(BaseMiddleware):
     """Middleware для проверки авторизации пользователя"""
     
@@ -27,10 +29,14 @@ class AuthMiddleware(BaseMiddleware):
             return await handler(event, data)
             
         logging.info(f"[AuthMiddleware] Event: {type(event)}, Telegram ID: {telegram_id}")
-        # Проверяем, является ли пользователь администратором
-        admin_ids = [int(id.strip()) for id in settings.ADMIN_USER_IDS.split(',') if id.strip()]
-        if telegram_id in admin_ids:
-            logging.info("[AuthMiddleware] User is ADMIN")
+        logger.debug(f"Проверка доступа для пользователя {telegram_id}")
+        logger.debug(f"Список администраторов: {settings.admin_ids}")
+        logger.debug(f"Тип telegram_id: {type(telegram_id)}")
+        logger.debug(f"Типы ID в admin_ids: {[type(id) for id in settings.admin_ids]}")
+        logger.debug(f"Сравнение: {telegram_id in settings.admin_ids}")
+        
+        if telegram_id in settings.admin_ids:
+            logger.info(f"Пользователь {telegram_id} является администратором")
             session_gen: AsyncGenerator = get_session()
             session = None
             user = None # Initialize user to None
@@ -75,25 +81,27 @@ class AuthMiddleware(BaseMiddleware):
                     await session.close()
                     logging.info("[AuthMiddleware] Admin Check: Session closed.")
         else:
-            # Проверяем, является ли пользователь клиентом
-            logging.info("[AuthMiddleware] User is not ADMIN, checking if CLIENT")
-            session_gen: AsyncGenerator = get_session()
-            session = None
-            try:
-                session = await session_gen.__anext__()
-                user = await get_user_by_telegram_id(session, telegram_id)
-                if user and user.role == settings.CLIENT_ROLE:
-                    logging.info("[AuthMiddleware] User is CLIENT")
-                    data["user"] = user
-                    result = await handler(event, data)
-                    return result
-                else:
-                    logging.info("[AuthMiddleware] User is not CLIENT")
-            except Exception as e:
-                logging.error(f"[AuthMiddleware] Client Check Error: {e}")
-            finally:
-                if session:
-                    await session.close()
+            logging.warning("[AuthMiddleware] ADMIN_USER_IDS is empty in settings")
+        
+        # Проверяем, является ли пользователь клиентом
+        logging.info("[AuthMiddleware] User is not ADMIN, checking if CLIENT")
+        session_gen: AsyncGenerator = get_session()
+        session = None
+        try:
+            session = await session_gen.__anext__()
+            user = await get_user_by_telegram_id(session, telegram_id)
+            if user and user.role == settings.CLIENT_ROLE:
+                logging.info("[AuthMiddleware] User is CLIENT")
+                data["user"] = user
+                result = await handler(event, data)
+                return result
+            else:
+                logging.info("[AuthMiddleware] User is not CLIENT")
+        except Exception as e:
+            logging.error(f"[AuthMiddleware] Client Check Error: {e}")
+        finally:
+            if session:
+                await session.close()
         
         logging.info("[AuthMiddleware] User is NOT ADMIN or check passed. Proceeding...")
         

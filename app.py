@@ -11,7 +11,7 @@ from construction_report_bot.database.session import create_db_session
 async def main():
     """Основная функция запуска бота"""
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         filename="bot.log"
     )

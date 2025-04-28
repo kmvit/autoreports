@@ -5,9 +5,22 @@ from pydantic import Field, field_validator
 from typing import List
 import os
 from dotenv import load_dotenv
+import logging
+
+# Настраиваем логирование
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 # Загрузка переменных окружения из файла .env
-load_dotenv()
+env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), '.env')
+logger.debug(f"Текущая директория: {os.getcwd()}")
+logger.debug(f"Путь к .env файлу: {env_path}")
+logger.debug(f"Файл .env существует: {os.path.exists(env_path)}")
+
+# Загружаем .env файл
+load_dotenv(dotenv_path=env_path, override=True)
+logger.debug(f"ADMIN_USER_IDS из .env: {os.getenv('ADMIN_USER_IDS')}")
+logger.debug(f"Все переменные окружения: {dict(os.environ)}")
 
 class Settings(BaseSettings):
     """Настройки приложения."""
@@ -18,6 +31,22 @@ class Settings(BaseSettings):
     # Настройки бота
     BOT_TOKEN: str = Field(..., env='BOT_TOKEN')
     ADMIN_USER_IDS: str = Field('', env='ADMIN_USER_IDS')
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        logger.debug(f"ADMIN_USER_IDS в settings после инициализации: {self.ADMIN_USER_IDS}")
+        self._create_required_directories()
+    
+    @property
+    def admin_ids(self) -> List[int]:
+        """Возвращает список ID администраторов в виде целых чисел"""
+        logger.debug(f"ADMIN_USER_IDS в settings: {self.ADMIN_USER_IDS}")
+        if not self.ADMIN_USER_IDS:
+            logger.debug("ADMIN_USER_IDS пустой")
+            return []
+        ids = [int(id.strip()) for id in self.ADMIN_USER_IDS.split(',') if id.strip()]
+        logger.debug(f"Преобразованные admin_ids: {ids}")
+        return ids
     
     # Настройки базы данных
     DB_HOST: str = Field(default='localhost', env='DB_HOST')
@@ -106,10 +135,6 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = False
-    
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self._create_required_directories()
     
     def _create_required_directories(self):
         """Создание необходимых директорий."""
