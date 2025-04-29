@@ -120,7 +120,7 @@ async def process_history_object(callback: CallbackQuery, session: AsyncSession,
             
             keyboard.append([InlineKeyboardButton(
                 text=f"📅 {date_str} ({report_count} отчетов)",
-                callback_data=f"history_date_{object_id}_{date_str}"
+                callback_data=f"history_date_{object_id}_{date_obj.strftime('%Y%m%d')}"
             )])
         
         keyboard.append([InlineKeyboardButton(
@@ -1042,7 +1042,7 @@ async def process_client_date_object_reports(callback: CallbackQuery, session: A
     try:
         # Получаем дату и ID объекта из callback_data
         _, date_str, object_id = callback.data.split("_", 2)
-        date = datetime.strptime(date_str, '%Y-%m-%d')
+        date = datetime.strptime(date_str, '%Y%m%d')
         object_id = int(object_id)
         
         # Получаем отчеты для объекта

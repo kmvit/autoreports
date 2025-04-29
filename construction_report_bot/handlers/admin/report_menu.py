@@ -424,7 +424,7 @@ async def show_object_reports(callback: CallbackQuery, session: AsyncSession):
             
             # Добавляем кнопку для даты
             button_text = f"📅 {formatted_date} ({report_count} отчетов)"
-            callback_data = f"date_object_reports_{date_str}_{object_id}"
+            callback_data = f"date_object_reports_{date_obj.strftime('%Y%m%d')}_{object_id}"
             logger.info(f"[show_object_reports] Создана кнопка: {button_text} с callback_data: {callback_data}")
             keyboard.append([InlineKeyboardButton(text=button_text, callback_data=callback_data)])
         
