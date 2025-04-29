@@ -247,22 +247,22 @@ async def cmd_today_report(message: Message, session: AsyncSession, state: FSMCo
         client = await get_client_by_user_id(session, user.id)
         
         if not client:
-            await message.answer("Ваш профиль не найден. Обратитесь к администратору.")
+            await message.answer("❌ Ваш профиль не найден. Обратитесь к администратору.")
             return
         
         # Получаем доступные объекты клиента
         objects = client.objects
         
         if not objects:
-            await message.answer("У вас нет доступных объектов. Обратитесь к администратору.")
+            await message.answer("❌ У вас нет доступных объектов. Обратитесь к администратору.")
             return
         
         # Создаем список объектов для клавиатуры
         objects_list = [{"id": obj.id, "name": obj.name} for obj in objects]
-        keyboard = create_object_keyboard(objects_list, "back_to_main")
+        keyboard = create_object_keyboard(objects_list, "back_to_main", "today_report_object_")
         
         await message.answer(
-            "Выберите объект для просмотра отчетов за сегодня:",
+            "📊 Выберите объект для просмотра отчетов за сегодня:",
             reply_markup=keyboard
         )
         
@@ -291,12 +291,29 @@ async def process_today_report_object(callback: CallbackQuery, session: AsyncSes
         if not await check_reports_exist(callback, reports, edit=True):
             return
         
+        # Группируем отчеты по типу (утренний/вечерний)
+        morning_reports = [r for r in reports if r.type == "morning"]
+        evening_reports = [r for r in reports if r.type == "evening"]
+        
         # Создаем клавиатуру с типами отчетов
-        keyboard = create_report_type_keyboard(reports, object_id, datetime.now().strftime('%Y-%m-%d'))
+        keyboard = []
+        
+        if morning_reports:
+            keyboard.append([InlineKeyboardButton(
+                text=f"🌅 Утренний ({len(morning_reports)} отчетов)",
+                callback_data=f"today_report_type_{object_id}_morning"
+            )])
+        
+        if evening_reports:
+            keyboard.append([InlineKeyboardButton(
+                text=f"🌆 Вечерний ({len(evening_reports)} отчетов)",
+                callback_data=f"today_report_type_{object_id}_evening"
+            )])
+        
         
         await callback.message.edit_text(
             f"Выберите тип отчета для объекта '{object_name}' за сегодня:",
-            reply_markup=keyboard
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
         )
         
     except Exception as e:
@@ -315,8 +332,7 @@ async def process_today_report_type(callback: CallbackQuery, session: AsyncSessi
         report_type = parts[4]
         
         # Получаем отчеты за сегодня для выбранного объекта и типа
-        reports = await get_today_reports(session, object_id)
-        filtered_reports = [r for r in reports if r.type == report_type]
+        reports = await get_today_reports(session, object_id, report_type)
         
         # Получаем информацию об объекте
         object_info, object_name = await get_object_info(session, object_id)
@@ -324,7 +340,7 @@ async def process_today_report_type(callback: CallbackQuery, session: AsyncSessi
         # Определяем название типа отчета
         type_name = "Утренний" if report_type == "morning" else "Вечерний"
         
-        if not await check_reports_exist(callback, filtered_reports, edit=True):
+        if not await check_reports_exist(callback, reports, edit=True):
             return
         
         # Формируем текст с информацией о выбранных отчетах
@@ -332,7 +348,7 @@ async def process_today_report_type(callback: CallbackQuery, session: AsyncSessi
         reports_text = f"{type_name} отчеты для объекта '{object_name}' за сегодня ({date_str}):\n\n"
         
         # Добавляем информацию о каждом отчете
-        for i, report in enumerate(filtered_reports, start=1):
+        for i, report in enumerate(reports, start=1):
             time_str = report.date.strftime("%H:%M")
             reports_text += f"{i}. {time_str} - {report.report_type or 'Общие работы'}\n"
         

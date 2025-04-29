@@ -358,17 +358,19 @@ async def get_reports_by_object(session: AsyncSession, object_id: int, user_id: 
     result = await session.execute(query)
     return result.unique().scalars().all()
 
-async def get_today_reports(session: AsyncSession, object_id: Optional[int] = None) -> List[Report]:
-    """Получение отчетов за сегодня, возможно с фильтром по объекту"""
-    # Получаем начало и конец сегодняшнего дня
-    today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    end_of_day = today.replace(hour=23, minute=59, second=59, microsecond=999999)
+async def get_today_reports(session: AsyncSession, object_id: Optional[int] = None, report_type: Optional[str] = None) -> List[Report]:
+    """Получение отчетов за сегодня, возможно с фильтром по объекту и типу отчета"""
+    # Получаем текущую дату в локальном часовом поясе
+    today = datetime.now().date()
     
     # Строим запрос с фильтрацией по текущей дате
-    query = select(Report).where(Report.date.between(today, end_of_day))
+    query = select(Report).where(func.date(Report.date) == today)
     
     if object_id:
         query = query.where(Report.object_id == object_id)
+    
+    if report_type:
+        query = query.where(Report.type == report_type)
     
     # Включаем связанные данные
     query = query.options(

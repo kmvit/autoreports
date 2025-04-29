@@ -296,13 +296,13 @@ def create_report_type_keyboard(reports: List[Report], object_id: int, date_str:
     
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-def create_object_keyboard(objects: List[dict], back_callback: str = "back_to_main") -> InlineKeyboardMarkup:
+def create_object_keyboard(objects: List[dict], back_callback: str = "back_to_main", prefix: str = "select_object_") -> InlineKeyboardMarkup:
     """Создает клавиатуру со списком объектов"""
     keyboard = []
     for obj in objects:
         keyboard.append([InlineKeyboardButton(
             text=f"🏗️ {obj['name']}",
-            callback_data=f"select_object_{obj['id']}"
+            callback_data=f"{prefix}{obj['id']}"
         )])
     keyboard.append([InlineKeyboardButton(
         text="🔙 Назад",

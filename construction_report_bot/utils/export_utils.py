@@ -15,6 +15,24 @@ from construction_report_bot.config.settings import settings
 # Регистрируем шрифт для поддержки кириллицы
 pdfmetrics.registerFont(TTFont('Arial', 'Arial.ttf'))
 
+def safe_parse_date(date_str: str) -> datetime:
+    """Безопасное преобразование строки даты в объект datetime"""
+    formats = [
+        '%Y-%m-%d',
+        '%d.%m.%Y',
+        '%Y%m%d',
+        '%d/%m/%Y'
+    ]
+    
+    for fmt in formats:
+        try:
+            return datetime.strptime(date_str, fmt)
+        except ValueError:
+            continue
+    
+    # Если ни один формат не подошел, возвращаем текущую дату
+    return datetime.now()
+
 def export_report_to_pdf(reports: List[Report], output_path: str) -> str:
     """Экспорт отчетов в PDF"""
     doc = SimpleDocTemplate(
@@ -46,17 +64,19 @@ def export_report_to_pdf(reports: List[Report], output_path: str) -> str:
     # Формируем элементы документа
     elements = []
     
-    # Добавляем заголовок
-    title = Paragraph(f"Отчет по строительным работам от {datetime.now().strftime('%d.%m.%Y')}", title_style)
+    # Добавляем заголовок с названием объекта и датой
+    if reports and reports[0].object:
+        report_date = reports[0].date
+        title = Paragraph(f"Отчет по объекту '{reports[0].object.name}' за {report_date.strftime('%d.%m.%Y')}", title_style)
+    else:
+        title = Paragraph(f"Отчет по строительным работам от {datetime.now().strftime('%d.%m.%Y')}", title_style)
     elements.append(title)
     elements.append(Spacer(1, 12))
     
     for report in reports:
         # Основная информация об отчете
         elements.append(Paragraph(f"Дата: {report.date.strftime('%d.%m.%Y %H:%M')}", normal_style))
-        elements.append(Paragraph(f"Объект: {report.object.name}", normal_style))
-        report_type = "Утренний" if report.type == "morning" else "Вечерний"
-        elements.append(Paragraph(f"Тип: {report_type}", normal_style))
+        elements.append(Paragraph(f"Тип: {report.type}", normal_style))
         elements.append(Paragraph(f"Тип работ: {report.report_type}", normal_style))
         
         if report.work_subtype:

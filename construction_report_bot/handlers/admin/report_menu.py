@@ -169,7 +169,7 @@ async def show_date_object_reports(callback: CallbackQuery, session: AsyncSessio
     logger.info(f"[show_date_object_reports] Извлечены данные: date_str={date_str}, object_id={object_id}")
     
     # Преобразуем строку даты в объект datetime
-    date = datetime.strptime(date_str, '%Y-%m-%d')
+    date = datetime.strptime(date_str, '%Y%m%d')
     logger.info(f"[show_date_object_reports] Преобразована дата: {date}")
     
     # Получаем информацию об объекте
@@ -253,7 +253,7 @@ async def show_date_object_type_reports(callback: CallbackQuery, session: AsyncS
     logger.info(f"[show_date_object_type_reports] Извлечены данные: date_str={date_str}, object_id={object_id}, report_type={report_type}")
     
     # Преобразуем строку даты в объект datetime
-    date = datetime.strptime(date_str, '%Y-%m-%d')
+    date = datetime.strptime(date_str, '%Y%m%d')
     logger.info(f"[show_date_object_type_reports] Преобразована дата: {date}")
     
     # Получаем информацию об объекте
