@@ -1,4 +1,11 @@
 from logging.config import fileConfig
+import os
+import sys
+from dotenv import load_dotenv
+
+# Загружаем переменные окружения из .env файла
+env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), '.env')
+load_dotenv(dotenv_path=env_path, override=True)
 
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
@@ -8,6 +15,20 @@ from alembic import context
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
+
+# Переопределяем URL из переменных окружения
+section = config.config_ini_section
+db_user = os.getenv("DB_USER", "home")
+db_password = os.getenv("DB_PASSWORD", "")
+db_host = os.getenv("DB_HOST", "localhost")
+db_port = os.getenv("DB_PORT", "5432")
+db_name = os.getenv("DB_NAME", "construction_reports")
+
+# Формируем URL с учетом наличия пароля
+if db_password:
+    config.set_main_option("sqlalchemy.url", f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}")
+else:
+    config.set_main_option("sqlalchemy.url", f"postgresql://{db_user}@{db_host}:{db_port}/{db_name}")
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
