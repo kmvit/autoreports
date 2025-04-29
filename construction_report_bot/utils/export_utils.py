@@ -12,8 +12,18 @@ import pandas as pd
 from construction_report_bot.database.models import Report
 from construction_report_bot.config.settings import settings
 
+# Получаем путь к директории с шрифтами
+FONTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'fonts')
+ARIAL_FONT_PATH = os.path.join(FONTS_DIR, 'ArialMT.ttf')
+
 # Регистрируем шрифт для поддержки кириллицы
-pdfmetrics.registerFont(TTFont('Arial', 'Arial.ttf'))
+FONT_NAME = 'Arial'
+try:
+    pdfmetrics.registerFont(TTFont(FONT_NAME, ARIAL_FONT_PATH))
+except Exception as e:
+    print(f"Ошибка при загрузке шрифта Arial: {e}")
+    # Используем Times-Roman как запасной вариант
+    FONT_NAME = 'Times-Roman'
 
 def safe_parse_date(date_str: str) -> datetime:
     """Безопасное преобразование строки даты в объект datetime"""
@@ -49,14 +59,14 @@ def export_report_to_pdf(reports: List[Report], output_path: str) -> str:
     title_style = ParagraphStyle(
         'CustomTitle',
         parent=styles['Heading1'],
-        fontName='Arial',
+        fontName=FONT_NAME,
         fontSize=16,
         spaceAfter=30
     )
     normal_style = ParagraphStyle(
         'CustomNormal',
         parent=styles['Normal'],
-        fontName='Arial',
+        fontName=FONT_NAME,
         fontSize=12,
         spaceAfter=12
     )
