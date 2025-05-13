@@ -147,12 +147,19 @@ async def get_work_subtype_keyboard(report_type: str) -> InlineKeyboardMarkup:
             ["Пожаротушение", "subtype_fire"],
             ["Вентиляция и кондиционирование", "subtype_ventilation"],
             ["Электроснабжение", "subtype_electricity"],
-            ["Слаботочные системы", "subtype_low_current"]
+            ["Слаботочные системы", "subtype_low_current"],
+            ["Монтаж стеновых сэндвич-панелей", "subtype_sandwich_panels"],
+            ["Устройство металлоконструкций", "subtype_metal_structures"]
         ],
         "report_internal_networks": [
             ["НВК", "subtype_nwc"],
             ["Работы с ГНБ", "subtype_gnb"],
-            ["ЭС", "subtype_es"]
+            ["ЭС", "subtype_es"],
+            ["Монтаж магистральной трубы ду 219", "subtype_main_pipe_219"],
+            ["АУПТ день", "subtype_aupt_day"],
+            ["АУПТ ночь", "subtype_aupt_night"],
+            ["Устройство кабельных трасс освещения день", "subtype_lighting_cable_day"],
+            ["Устройство кабельных трасс освещения ночь", "subtype_lighting_cable_night"]
         ],
         "report_general_construction": [
             ["Монолит", "subtype_monolith"],
@@ -161,7 +168,8 @@ async def get_work_subtype_keyboard(report_type: str) -> InlineKeyboardMarkup:
             ["Кладочные работы", "subtype_masonry"],
             ["Фасадные работы", "subtype_facade"],
             ["Кровельные работы", "subtype_roofing"],
-            ["Отделочные работы", "subtype_finishing"]
+            ["Отделочные работы", "subtype_finishing"],
+            ["Обеспечение строительной площадки", "subtype_construction_site_support"]
         ],
         "work_landscaping": [
             ["Благоустройство территории", "subtype_territory_improvement"],
