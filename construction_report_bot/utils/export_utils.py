@@ -14,7 +14,7 @@ from construction_report_bot.config.settings import settings
 
 # Получаем путь к директории с шрифтами
 FONTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'fonts')
-ARIAL_FONT_PATH = os.path.join(FONTS_DIR, 'ArialMT.ttf')
+ARIAL_FONT_PATH = os.path.join(FONTS_DIR, 'arialmt.ttf')
 
 # Регистрируем шрифт для поддержки кириллицы
 FONT_NAME = 'Arial'
