@@ -162,6 +162,7 @@ async def get_work_subtype_keyboard(report_type: str) -> InlineKeyboardMarkup:
             ["Устройство кабельных трасс освещения ночь", "subtype_lighting_cable_night"]
         ],
         "report_general_construction": [
+            ["Устройство монолитных ЖБ полов", "subtype_monolithic_concrete_floors"],
             ["Монолит", "subtype_monolith"],
             ["Устройство котлована", "subtype_excavation"],
             ["Демонтажные работы", "subtype_dismantling"],
