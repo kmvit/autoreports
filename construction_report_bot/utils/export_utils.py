@@ -25,6 +25,56 @@ except Exception as e:
     # Используем Times-Roman как запасной вариант
     FONT_NAME = 'Times-Roman'
 
+# Словарь с русскими названиями типов работ
+WORK_TYPE_NAMES = {
+    "report_engineering": "Инженерные коммуникации",
+    "report_internal_networks": "Внутриплощадочные сети",
+    "report_landscaping": "Благоустройство",
+    "report_general_construction": "Общестроительные работы"
+}
+
+# Словарь с русскими названиями подтипов работ
+WORK_SUBTYPE_NAMES = {
+    # Инженерные коммуникации
+    "subtype_heating": "Отопление",
+    "subtype_water": "Водоснабжение и канализация",
+    "subtype_fire": "Пожаротушение",
+    "subtype_ventilation": "Вентиляция и кондиционирование",
+    "subtype_electricity": "Электроснабжение",
+    "subtype_low_current": "Слаботочные системы",
+    "subtype_sandwich_panels": "Монтаж стеновых сэндвич-панелей",
+    "subtype_metal_structures": "Устройство металлоконструкций",
+    
+    # Внутриплощадочные сети
+    "subtype_nwc": "НВК",
+    "subtype_gnb": "Работы с ГНБ",
+    "subtype_es": "ЭС",
+    "subtype_main_pipe_219": "Монтаж магистральной трубы ду 219",
+    "subtype_aupt_day": "АУПТ день",
+    "subtype_aupt_night": "АУПТ ночь",
+    "subtype_lighting_cable_day": "Устройство кабельных трасс освещения день",
+    "subtype_lighting_cable_night": "Устройство кабельных трасс освещения ночь",
+    
+    # Общестроительные работы
+    "subtype_monolithic_concrete_floors": "Устройство монолитных ЖБ полов",
+    "subtype_monolith": "Монолит",
+    "subtype_excavation": "Устройство котлована",
+    "subtype_dismantling": "Демонтажные работы",
+    "subtype_masonry": "Кладочные работы",
+    "subtype_facade": "Фасадные работы",
+    "subtype_roofing": "Кровельные работы",
+    "subtype_finishing": "Отделочные работы",
+    "subtype_construction_site_support": "Обеспечение строительной площадки",
+    
+    # Благоустройство
+    "subtype_territory_improvement": "Благоустройство территории",
+    "subtype_landscaping": "Озеленение",
+    "subtype_paths": "Устройство дорожек",
+    "subtype_platforms": "Устройство площадок",
+    "subtype_fencing": "Устройство ограждений",
+    "subtype_maf": "Устройство малых архитектурных форм"
+}
+
 def safe_parse_date(date_str: str) -> datetime:
     """Безопасное преобразование строки даты в объект datetime"""
     formats = [
@@ -53,6 +103,9 @@ def export_report_to_pdf(reports: List[Report], output_path: str) -> str:
         topMargin=72,
         bottomMargin=72
     )
+    
+    # Получаем доступную ширину страницы (ширина A4 минус отступы)
+    available_width = A4[0] - doc.leftMargin - doc.rightMargin
     
     # Создаем стили
     styles = getSampleStyleSheet()
@@ -86,11 +139,18 @@ def export_report_to_pdf(reports: List[Report], output_path: str) -> str:
     for report in reports:
         # Основная информация об отчете
         elements.append(Paragraph(f"Дата: {report.date.strftime('%d.%m.%Y %H:%M')}", normal_style))
-        elements.append(Paragraph(f"Тип: {report.type}", normal_style))
-        elements.append(Paragraph(f"Тип работ: {report.report_type}", normal_style))
+        # Преобразуем тип отчета в русский
+        report_type_display = "Утренний" if report.type == "morning" else "Вечерний"
+        elements.append(Paragraph(f"Тип: {report_type_display}", normal_style))
+        
+        # Преобразуем тип работ в русский
+        work_type_display = WORK_TYPE_NAMES.get(report.report_type, report.report_type)
+        elements.append(Paragraph(f"Тип работ: {work_type_display}", normal_style))
         
         if report.work_subtype:
-            elements.append(Paragraph(f"Подтип работ: {report.work_subtype}", normal_style))
+            # Преобразуем подтип в русский язык
+            work_subtype_display = WORK_SUBTYPE_NAMES.get(f"subtype_{report.work_subtype}", report.work_subtype)
+            elements.append(Paragraph(f"Подтип работ: {work_subtype_display}", normal_style))
         
         # ИТР
         if report.itr_personnel:
@@ -116,7 +176,12 @@ def export_report_to_pdf(reports: List[Report], output_path: str) -> str:
             elements.append(Paragraph("Фотографии:", normal_style))
             for photo in report.photos:
                 if os.path.exists(photo.file_path):
-                    img = Image(photo.file_path, width=400, height=300)
+                    # Создаем изображение с автоматическим масштабированием под размер страницы
+                    img = Image(photo.file_path)
+                    # Если изображение шире доступной ширины страницы, масштабируем его
+                    if img.imageWidth > available_width:
+                        img.drawWidth = available_width
+                        img.drawHeight = img.imageHeight * (available_width / img.imageWidth)
                     elements.append(img)
                     if photo.description:
                         elements.append(Paragraph(f"Описание: {photo.description}", normal_style))
@@ -133,12 +198,15 @@ def export_report_to_excel(reports: List[Report], output_path: str) -> str:
     # Подготавливаем данные для Excel
     data = []
     for report in reports:
+        # Преобразуем подтип в русский язык
+        work_subtype_display = WORK_SUBTYPE_NAMES.get(f"subtype_{report.work_subtype}", report.work_subtype) if report.work_subtype else ''
+        
         row = {
             'Дата': report.date.strftime('%d.%m.%Y %H:%M'),
             'Объект': report.object.name,
-            'Тип': report.type,
+            'Тип': "Утренний" if report.type == "morning" else "Вечерний",
             'Тип работ': report.report_type,
-            'Подтип работ': report.work_subtype or '',
+            'Подтип работ': work_subtype_display,
             'ИТР': ', '.join([itr.full_name for itr in report.itr_personnel]) if report.itr_personnel else '',
             'Рабочие': ', '.join([w.full_name for w in report.workers]) if report.workers else '',
             'Техника': ', '.join([eq.name for eq in report.equipment]) if report.equipment else '',

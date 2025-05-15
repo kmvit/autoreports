@@ -22,7 +22,6 @@ from construction_report_bot.config.keyboards import (
 from construction_report_bot.utils.decorators import error_handler, with_session
 from construction_report_bot.middlewares.role_check import admin_required
 from construction_report_bot.utils.logging.logger import log_admin_action, log_error
-from construction_report_bot.services.report_service import ReportService
 from construction_report_bot.utils.export_utils import export_report_to_pdf, export_report_to_excel
 
 logger = logging.getLogger(__name__)
