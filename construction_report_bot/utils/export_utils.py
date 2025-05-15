@@ -138,7 +138,7 @@ def export_report_to_pdf(reports: List[Report], output_path: str) -> str:
     
     for report in reports:
         # Основная информация об отчете
-        elements.append(Paragraph(f"Дата: {report.date.strftime('%d.%m.%Y %H:%M')}", normal_style))
+        elements.append(Paragraph(f"Дата: {report.date.strftime('%d.%m.%Y')}", normal_style))
         # Преобразуем тип отчета в русский
         report_type_display = "Утренний" if report.type == "morning" else "Вечерний"
         elements.append(Paragraph(f"Тип: {report_type_display}", normal_style))
