@@ -225,7 +225,7 @@ async def process_export_pdf(callback: CallbackQuery, state: FSMContext, session
                 return
             
             # Определяем название типа отчета
-            type_name = "Утренний" if report_type == "morning_report" else "Вечерний"
+            type_name = "Утренний" if report_type == "morning" else "Вечерний"
             
             # Создаем директорию для экспорта, если её нет
             export_dir = os.path.join(settings.BASE_DIR, settings.EXPORT_DIR)

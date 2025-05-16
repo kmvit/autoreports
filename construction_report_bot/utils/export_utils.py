@@ -176,12 +176,12 @@ def export_report_to_pdf(reports: List[Report], output_path: str) -> str:
             elements.append(Paragraph("Фотографии:", normal_style))
             for photo in report.photos:
                 if os.path.exists(photo.file_path):
-                    # Создаем изображение с автоматическим масштабированием под размер страницы
+                    # Создаем изображение с фиксированной шириной 300 пикселей
                     img = Image(photo.file_path)
-                    # Если изображение шире доступной ширины страницы, масштабируем его
-                    if img.imageWidth > available_width:
-                        img.drawWidth = available_width
-                        img.drawHeight = img.imageHeight * (available_width / img.imageWidth)
+                    # Устанавливаем фиксированную ширину 300 пикселей
+                    img.drawWidth = 300
+                    # Сохраняем пропорции изображения
+                    img.drawHeight = img.imageHeight * (300 / img.imageWidth)
                     elements.append(img)
                     if photo.description:
                         elements.append(Paragraph(f"Описание: {photo.description}", normal_style))
