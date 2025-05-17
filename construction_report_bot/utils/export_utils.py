@@ -106,7 +106,9 @@ def export_report_to_pdf(reports: List[Report], output_path: str) -> str:
     
     # Получаем доступную ширину страницы (ширина A4 минус отступы)
     available_width = A4[0] - doc.leftMargin - doc.rightMargin
-    
+    # Получаем доступную высоту контентной части страницы (высота A4 минус отступы)
+    page_content_total_height = A4[1] - doc.topMargin - doc.bottomMargin
+
     # Создаем стили
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle(
@@ -176,12 +178,36 @@ def export_report_to_pdf(reports: List[Report], output_path: str) -> str:
             elements.append(Paragraph("Фотографии:", normal_style))
             for photo in report.photos:
                 if os.path.exists(photo.file_path):
-                    # Создаем изображение с фиксированной шириной 300 пикселей
                     img = Image(photo.file_path)
-                    # Устанавливаем фиксированную ширину 300 пикселей
-                    img.drawWidth = 300
-                    # Сохраняем пропорции изображения
-                    img.drawHeight = img.imageHeight * (300 / img.imageWidth)
+                    img_orig_width = img.imageWidth
+                    img_orig_height = img.imageHeight
+
+                    # Стандартный внутренний отступ фрейма в reportlab (6pt с каждой стороны)
+                    frame_internal_padding = 12 
+                    actual_drawable_width_in_frame = available_width - frame_internal_padding
+                    actual_drawable_page_height_in_frame = page_content_total_height - frame_internal_padding
+
+                    # Определяем максимальную высоту изображения (например, 50% от доступной высоты фрейма)
+                    # Это значение можно изменить для управления размером фото
+                    MAX_PHOTO_HEIGHT_PERCENTAGE = 0.5 
+                    max_allowed_photo_render_height = actual_drawable_page_height_in_frame * MAX_PHOTO_HEIGHT_PERCENTAGE
+                    
+                    # Максимально допустимая ширина для фото - это доступная ширина внутри фрейма
+                    max_allowed_photo_render_width = actual_drawable_width_in_frame
+
+                    scale_factor_w = 1.0
+                    if img_orig_width > max_allowed_photo_render_width:
+                        scale_factor_w = max_allowed_photo_render_width / img_orig_width
+                        
+                    scale_factor_h = 1.0
+                    if img_orig_height > max_allowed_photo_render_height:
+                        scale_factor_h = max_allowed_photo_render_height / img_orig_height
+                        
+                    final_scale = min(scale_factor_w, scale_factor_h)
+                    
+                    img.drawWidth = img_orig_width * final_scale
+                    img.drawHeight = img_orig_height * final_scale
+                    
                     elements.append(img)
                     if photo.description:
                         elements.append(Paragraph(f"Описание: {photo.description}", normal_style))
