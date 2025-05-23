@@ -8,6 +8,9 @@ T = TypeVar('T')
 def validate_full_name(name: str) -> bool:
     """
     Проверка формата ФИО.
+    Поддерживает форматы:
+    - Фамилия Имя Отчество
+    - Фамилия И.О.
     
     Args:
         name: Строка с ФИО
@@ -15,7 +18,13 @@ def validate_full_name(name: str) -> bool:
     Returns:
         bool: True если формат корректный, иначе False
     """
-    return bool(re.match(r'^[А-Яа-яЁё\s-]{2,100}$', name))
+    # Паттерн для полного ФИО (Фамилия Имя Отчество)
+    full_pattern = r'^[А-Яа-яЁё\s-]{2,100}$'
+    
+    # Паттерн для сокращенного ФИО (Фамилия И.О.)
+    short_pattern = r'^[А-Яа-яЁё-]+\s[А-Я]\.\s?[А-Я]\.$'
+    
+    return bool(re.match(full_pattern, name) or re.match(short_pattern, name))
 
 def validate_organization(org: str) -> bool:
     """

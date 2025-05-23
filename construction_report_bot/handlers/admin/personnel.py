@@ -523,7 +523,7 @@ async def process_personnel_name(message: Message, state: FSMContext, session: A
     """
     try:
         if not validate_full_name(message.text):
-            await message.answer("❌ Неверный формат ФИО. Пожалуйста, введите ФИО в формате 'Фамилия Имя Отчество'")
+            await message.answer("❌ Неверный формат ФИО. Пожалуйста, введите ФИО в формате 'Фамилия Имя Отчество' или 'Фамилия И.О.'")
             return
 
         name = message.text.strip()
@@ -622,7 +622,7 @@ async def process_new_personnel_name(message: Message, state: FSMContext, sessio
         if not validate_full_name(name):
             await message.answer(
                 "Неверный формат ФИО. Пожалуйста, введите корректное ФИО "
-                "(например: Иванов Иван Иванович):"
+                "(например: Иванов Иван Иванович или Иванов И.И.):"
             )
             return
         
